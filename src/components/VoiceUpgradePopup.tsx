@@ -10,7 +10,7 @@ interface VoiceUpgradePopupProps {
 }
 
 export default function VoiceUpgradePopup({ onClose, userEmail }: VoiceUpgradePopupProps) {
-  const checkoutUrl = 'https://auth.onsiteclub.ca/checkout/premium';
+  const checkoutUrl = 'https://auth.onsiteclub.ca/checkout/calculator';
 
   const handleStartTrial = async () => {
     // Monta a URL com parâmetros

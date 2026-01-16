@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, type UserProfile } from '../lib/supabase';
+import { checkPremiumAccess, refreshSubscriptionStatus } from '../lib/subscription';
 import type { User, Session } from '@supabase/supabase-js';
 
 interface AuthState {
@@ -59,22 +60,17 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   // Verifica se o usuário tem acesso à funcionalidade de voz
-  const checkVoiceAccess = useCallback((profile: UserProfile | null): boolean => {
-    if (!profile) return false;
+  // Agora usa a verificação via tabela subscriptions ao invés do profile
+  const checkVoiceAccess = useCallback(async (userId: string | null): Promise<boolean> => {
+    if (!userId) return false;
 
-    const { subscription_status, trial_ends_at } = profile;
-
-    // Usuário com assinatura ativa
-    if (subscription_status === 'active') return true;
-
-    // Usuário em trial (6 meses grátis)
-    if (subscription_status === 'trialing' && trial_ends_at) {
-      const trialEnd = new Date(trial_ends_at);
-      const now = new Date();
-      return now < trialEnd;
+    try {
+      const hasAccess = await checkPremiumAccess();
+      return hasAccess;
+    } catch (err) {
+      console.error('[Auth] Error checking voice access:', err);
+      return false;
     }
-
-    return false;
   }, []);
 
   // Carrega a sessão atual ao montar o componente
@@ -104,7 +100,7 @@ export function useAuth(): UseAuthReturn {
 
           if (!mounted) return;
 
-          const hasVoiceAccess = checkVoiceAccess(profile);
+          const hasVoiceAccess = await checkVoiceAccess(session.user.id);
 
           setAuthState({
             user: session.user,
@@ -156,7 +152,7 @@ export function useAuth(): UseAuthReturn {
 
           if (!mounted) return;
 
-          const hasVoiceAccess = checkVoiceAccess(profile);
+          const hasVoiceAccess = await checkVoiceAccess(session.user.id);
 
           setAuthState({
             user: session.user,
@@ -270,18 +266,9 @@ export function useAuth(): UseAuthReturn {
 
       const profile = profileData as UserProfile | null;
 
-      // Verifica voice access diretamente sem usar checkVoiceAccess
-      let hasVoiceAccess = false;
-      if (profile) {
-        const { subscription_status, trial_ends_at } = profile;
-        if (subscription_status === 'active') {
-          hasVoiceAccess = true;
-        } else if (subscription_status === 'trialing' && trial_ends_at) {
-          const trialEnd = new Date(trial_ends_at);
-          const now = new Date();
-          hasVoiceAccess = now < trialEnd;
-        }
-      }
+      // Força refresh do status de assinatura (limpa cache e verifica novamente)
+      console.log('[Auth] Refreshing subscription status');
+      const hasVoiceAccess = await refreshSubscriptionStatus();
 
       setAuthState(prev => ({
         ...prev,
