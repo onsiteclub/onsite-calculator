@@ -7,9 +7,13 @@ import { Capacitor } from '@capacitor/core';
 
 const SUBSCRIPTION_CACHE_KEY = 'calculator_subscription_status';
 const CACHE_DURATION = 1000 * 60 * 5; // 5 minutos
+const AUTH_HUB_API = 'https://auth.onsiteclub.ca/api/subscription/status?app=calculator';
 
 // Cache em memória como fallback
 let memoryCache: CachedSubscription | null = null;
+
+// Flag para evitar múltiplas chamadas simultâneas
+let isChecking = false;
 
 interface CachedSubscription {
   hasAccess: boolean;
@@ -74,6 +78,37 @@ async function setCache(data: CachedSubscription): Promise<void> {
 }
 
 /**
+ * Verifica status via API do Auth Hub
+ * Usa credentials: 'include' para enviar cookies de autenticação
+ */
+async function checkViaAuthHub(): Promise<boolean> {
+  try {
+    console.log('[Subscription] Checking via Auth Hub API...');
+
+    const response = await fetch(AUTH_HUB_API, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('[Subscription] Auth Hub API returned:', response.status);
+      return false;
+    }
+
+    const data = await response.json();
+    console.log('[Subscription] Auth Hub response:', data);
+
+    return data.hasAccess === true;
+  } catch (err) {
+    console.warn('[Subscription] Auth Hub API error:', err);
+    return false;
+  }
+}
+
+/**
  * Verifica se o usuário tem assinatura ativa no Supabase
  * Consulta diretamente a tabela 'subscriptions'
  */
@@ -91,20 +126,22 @@ export async function hasActiveSubscription(): Promise<boolean> {
       return false;
     }
 
+    // Usa .maybeSingle() ao invés de .single() para não dar erro quando não encontra
     const { data, error } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('user_id', user.id)
       .eq('app', 'calculator')
-      .single();
+      .maybeSingle();
 
-    if (error) {
+    // PGRST116 = "No rows found" - isso é esperado para usuários sem assinatura
+    if (error && error.code !== 'PGRST116') {
       console.error('[Subscription] Error fetching subscription:', error);
       return false;
     }
 
     if (!data) {
-      console.log('[Subscription] No subscription found');
+      console.log('[Subscription] No subscription found for user');
       return false;
     }
 
@@ -130,10 +167,18 @@ export async function hasActiveSubscription(): Promise<boolean> {
 
 /**
  * Verifica acesso premium com cache local
- * Evita verificações repetidas no Supabase
+ * Tenta Auth Hub API primeiro, depois Supabase como fallback
  */
 export async function checkPremiumAccess(): Promise<boolean> {
+  // Evita chamadas simultâneas
+  if (isChecking) {
+    console.log('[Subscription] Already checking, returning cached or false');
+    return memoryCache?.hasAccess ?? false;
+  }
+
   try {
+    isChecking = true;
+
     // Tentar cache primeiro
     const cached = await getCache();
 
@@ -148,8 +193,14 @@ export async function checkPremiumAccess(): Promise<boolean> {
       }
     }
 
-    // Cache expirado ou não existe, verificar no servidor
-    const hasAccess = await hasActiveSubscription();
+    // Tentar Auth Hub API primeiro
+    let hasAccess = await checkViaAuthHub();
+
+    // Se Auth Hub falhar, tentar Supabase como fallback
+    if (!hasAccess) {
+      console.log('[Subscription] Auth Hub returned false, trying Supabase fallback');
+      hasAccess = await hasActiveSubscription();
+    }
 
     // Salvar no cache
     await setCache({
@@ -160,8 +211,9 @@ export async function checkPremiumAccess(): Promise<boolean> {
     return hasAccess;
   } catch (err) {
     console.error('[Subscription] Error checking premium access:', err);
-    // Em caso de erro, retorna false (sem acesso)
     return false;
+  } finally {
+    isChecking = false;
   }
 }
 

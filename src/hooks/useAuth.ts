@@ -60,12 +60,11 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   // Verifica se o usuário tem acesso à funcionalidade de voz
-  // Agora usa a verificação via tabela subscriptions ao invés do profile
-  const checkVoiceAccess = useCallback(async (userId: string | null): Promise<boolean> => {
-    if (!userId) return false;
-
+  // Agora faz verificação assíncrona via Auth Hub API + Supabase
+  const checkVoiceAccessAsync = useCallback(async (): Promise<boolean> => {
     try {
       const hasAccess = await checkPremiumAccess();
+      console.log('[Auth] Voice access check result:', hasAccess);
       return hasAccess;
     } catch (err) {
       console.error('[Auth] Error checking voice access:', err);
@@ -100,7 +99,7 @@ export function useAuth(): UseAuthReturn {
 
           if (!mounted) return;
 
-          const hasVoiceAccess = await checkVoiceAccess(session.user.id);
+          const hasVoiceAccess = await checkVoiceAccessAsync();
 
           setAuthState({
             user: session.user,
@@ -152,7 +151,7 @@ export function useAuth(): UseAuthReturn {
 
           if (!mounted) return;
 
-          const hasVoiceAccess = await checkVoiceAccess(session.user.id);
+          const hasVoiceAccess = await checkVoiceAccessAsync();
 
           setAuthState({
             user: session.user,

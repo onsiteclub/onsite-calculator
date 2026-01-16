@@ -9,9 +9,19 @@ const ALLOWED_ORIGINS = [
   'https://calculator.onsiteclub.ca',
   'https://app.onsiteclub.ca',
   'capacitor://localhost',
+  'https://localhost',  // Capacitor with androidScheme: 'https'
   'http://localhost:5173',
   'http://localhost:3000',
 ];
+
+// Check if origin should be allowed (includes Capacitor native apps)
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  // Allow Capacitor apps (they may send no origin or file://)
+  if (origin.startsWith('capacitor://') || origin.startsWith('ionic://')) return true;
+  return false;
+}
 
 // Rate limiting simples (em produção usar Redis/Upstash)
 const rateLimitMap = new Map<string, number[]>();
@@ -84,8 +94,12 @@ Return mode:"normal" ONLY for pure arithmetic without fractions.`;
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS
   const origin = req.headers.origin || '';
-  if (ALLOWED_ORIGINS.includes(origin)) {
+  if (isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    // Native apps may not send origin header - allow all for now
+    // In production, you might want to use authentication instead
+    res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');

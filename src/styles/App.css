@@ -222,7 +222,7 @@
   color: #9AA7B5;
 }
 
-/* Voice Button - CORREÇÃO: Compacto */
+/* Voice Button - Estados visuais melhorados */
 .voice-btn {
   width: 100%;
   display: flex;
@@ -240,7 +240,7 @@
   user-select: none;
   -webkit-user-select: none;
   touch-action: manipulation;
-  transition: all 0.2s;
+  transition: all 0.15s ease-out;
 }
 
 .voice-btn:disabled {
@@ -248,18 +248,86 @@
   cursor: not-allowed;
 }
 
+/* Estado: Gravando (pressionado) - Amarelo sólido forte */
 .voice-btn.listening {
+  background: #FDB913;
+  border-color: #E5A811;
+  color: #0E1A2A;
+  transform: scale(1.02);
+  box-shadow: 0 4px 20px rgba(253, 185, 19, 0.5);
+}
+
+/* Estado: Processando - Teal com animação de pulso */
+.voice-btn.processing {
   background: #0F3D3A;
   border-color: #0F3D3A;
   color: #FFFFFF;
+  animation: pulse-thinking 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-thinking {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(0.98);
+  }
+}
+
+/* Estado: Bloqueado (sem acesso) */
+.voice-btn.locked {
+  background: rgba(100, 100, 100, 0.08);
+  border-color: rgba(100, 100, 100, 0.25);
+  color: #5C6B7A;
 }
 
 .voice-icon {
   font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Animação do ícone quando gravando */
+.voice-btn.listening .voice-icon {
+  animation: pulse-recording 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse-recording {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
 }
 
 .voice-text {
   color: inherit;
+}
+
+/* Feedback visual acima do botão */
+.voice-feedback {
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+  min-height: 24px;
+  color: #5C6B7A;
+}
+
+.voice-feedback.recording {
+  color: #FDB913;
+  font-weight: 600;
+  animation: fade-in-out 1s ease-in-out infinite;
+}
+
+.voice-feedback.processing {
+  color: #0F3D3A;
+  font-weight: 600;
+}
+
+@keyframes fade-in-out {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* Memory - CORREÇÃO: Compacto */

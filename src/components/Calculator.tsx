@@ -2,6 +2,7 @@
 // Componente principal da calculadora
 
 import { useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useCalculator, useOnlineStatus, useVoiceRecorder } from '../hooks';
 import { calculate } from '../lib/calculator';
 import type { VoiceState, VoiceResponse } from '../types/calculator';
@@ -21,7 +22,22 @@ const KEYPAD = [
   ['0', '.', '='],
 ];
 
-const API_ENDPOINT = import.meta.env.VITE_API_URL || '/api/interpret';
+// API endpoint - use production URL for native apps, relative path for web
+const getApiEndpoint = () => {
+  // If explicitly set in env, use that
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+
+  // For native apps (Capacitor), use full production URL
+  if (Capacitor.isNativePlatform()) {
+    return 'https://calculator.onsiteclub.ca/api/interpret';
+  }
+
+  return '/api/interpret';
+};
+
+const API_ENDPOINT = getApiEndpoint();
 
 interface CalculatorProps {
   voiceState: VoiceState;
@@ -54,27 +70,44 @@ export default function Calculator({
 
   // Handler para quando gravação terminar
   const handleAudioUpload = useCallback(async (audioBlob: Blob) => {
+    console.log('[Voice] Audio upload started, blob size:', audioBlob.size, 'bytes');
+    console.log('[Voice] API endpoint:', API_ENDPOINT);
+
+    if (audioBlob.size === 0) {
+      console.error('[Voice] Empty audio blob - recording may have failed');
+      setVoiceState('idle');
+      return;
+    }
+
     setVoiceState('processing');
-    
+
     const formData = new FormData();
     formData.append('file', audioBlob, 'recording.webm');
 
     try {
+      console.log('[Voice] Sending request to API...');
       const response = await fetch(API_ENDPOINT, {
         method: 'POST',
         body: formData,
       });
 
-      if (!response.ok) throw new Error('API Error');
-      
+      console.log('[Voice] Response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Voice] API Error:', response.status, errorText);
+        throw new Error(`API Error: ${response.status}`);
+      }
+
       const data: VoiceResponse = await response.json();
+      console.log('[Voice] API response:', data);
 
       if (data.expression) {
         setExpression(data.expression);
         const result = calculate(data.expression);
-        if (result) {
-          // Trigger display update através do hook
-        }
+        console.log('[Voice] Calculation result:', result);
+      } else if (data.error) {
+        console.error('[Voice] API returned error:', data.raw);
       }
     } catch (error) {
       console.error('[Voice] Error:', error);
@@ -153,12 +186,29 @@ export default function Calculator({
     }
   };
 
+  // Texto do botão de voz baseado no estado
   const getVoiceButtonText = () => {
     if (!isOnline) return 'Offline';
     if (!hasVoiceAccess) return '🔒 Upgrade to Voice';
-    if (voiceState === 'recording') return 'Release to Send';
-    if (voiceState === 'processing') return 'Thinking...';
-    return 'Hold to Speak';
+    if (voiceState === 'recording') return '🎤 Listening...';
+    if (voiceState === 'processing') return '🧠 Thinking...';
+    return '🎙️ Hold to Speak';
+  };
+
+  // Feedback visual acima do botão
+  const getVoiceFeedback = () => {
+    if (voiceState === 'recording') return '🔴 Speak now...';
+    if (voiceState === 'processing') return 'Processing your voice...';
+    return '';
+  };
+
+  // Classes CSS do botão
+  const getVoiceButtonClass = () => {
+    const classes = ['voice-btn'];
+    if (voiceState === 'recording') classes.push('listening');
+    if (voiceState === 'processing') classes.push('processing');
+    if (!hasVoiceAccess) classes.push('locked');
+    return classes.join(' ');
   };
 
   // Handler para abrir site OnSite Club
@@ -218,9 +268,16 @@ export default function Calculator({
             placeholder="Type or speak: 5 1/2 + 3 1/4 - 2"
           />
           
+          {/* Feedback visual acima do botão */}
+          {getVoiceFeedback() && (
+            <div className={`voice-feedback ${voiceState}`}>
+              {getVoiceFeedback()}
+            </div>
+          )}
+
           <button
-            className={`voice-btn ${voiceState === 'recording' ? 'listening' : ''}`}
-            disabled={!isOnline}
+            className={getVoiceButtonClass()}
+            disabled={!isOnline || voiceState === 'processing'}
             onMouseDown={handleVoiceStart}
             onMouseUp={handleVoiceEnd}
             onMouseLeave={voiceState === 'recording' ? handleVoiceEnd : undefined}
@@ -229,15 +286,21 @@ export default function Calculator({
           >
             <span className="voice-icon">
               {voiceState === 'recording' ? (
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                  <circle cx="10" cy="10" r="8" />
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+              ) : voiceState === 'processing' ? (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="0">
+                    <animate attributeName="stroke-dashoffset" values="0;60" dur="1s" repeatCount="indefinite" />
+                  </circle>
                 </svg>
               ) : (
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M10 2C8.34 2 7 3.34 7 5V10C7 11.66 8.34 13 10 13C11.66 13 13 11.66 13 10V5C13 3.34 11.66 2 10 2Z" />
-                  <path d="M5.5 9.5V10C5.5 12.49 7.51 14.5 10 14.5C12.49 14.5 14.5 12.49 14.5 10V9.5" strokeLinecap="round" />
-                  <path d="M10 14.5V18" strokeLinecap="round" />
-                  <path d="M7 18H13" strokeLinecap="round" />
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2C10.34 2 9 3.34 9 5V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V5C15 3.34 13.66 2 12 2Z" />
+                  <path d="M6 11V12C6 15.31 8.69 18 12 18C15.31 18 18 15.31 18 12V11" strokeLinecap="round" />
+                  <path d="M12 18V22" strokeLinecap="round" />
+                  <path d="M8 22H16" strokeLinecap="round" />
                 </svg>
               )}
             </span>

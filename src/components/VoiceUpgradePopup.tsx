@@ -64,7 +64,7 @@ export default function VoiceUpgradePopup({ onClose, userEmail }: VoiceUpgradePo
             <span className="popup-trial-badge">6 MONTHS FREE</span>
             <p className="popup-trial-text">Try it free, cancel anytime</p>
           </div>
-          <p className="popup-price">Then $9.99/year</p>
+          <p className="popup-price">Then $11.99 CAD/year</p>
         </div>
         
         <button className="popup-btn popup-btn-primary" onClick={handleStartTrial}>
