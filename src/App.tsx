@@ -17,6 +17,7 @@ export default function App() {
     hasVoiceAccess,
     signIn,
     signUp,
+    signOut,
     refreshProfile,
   } = useAuth();
 
@@ -77,6 +78,7 @@ export default function App() {
         setVoiceState={setVoiceState}
         hasVoiceAccess={hasVoiceAccess}
         onVoiceUpgradeClick={() => setShowVoicePopup(true)}
+        onSignOut={signOut}
         userName={profile?.nome || profile?.email || user?.email}
       />
     </>

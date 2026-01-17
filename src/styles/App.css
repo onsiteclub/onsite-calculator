@@ -1127,6 +1127,29 @@
   border-color: rgba(239, 68, 68, 0.5);
 }
 
+.sign-out-btn {
+  background: transparent;
+  border: 1px solid #D9E1EA;
+  color: #5C6B7A;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.sign-out-btn:hover {
+  background: #FEE2E2;
+  border-color: #EF4444;
+  color: #DC2626;
+}
+
+.sign-out-btn:active {
+  background: #FECACA;
+}
+
 /* ============================================
    LOADING SCREEN
    ============================================ */
