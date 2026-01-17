@@ -1,9 +1,20 @@
 // api/interpret.ts
-// Voice-to-Expression API - Whisper + GPT-4o-mini
+// Voice-to-Expression API - Whisper + GPT-4o
 // Vercel Serverless Function
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { serverLog, getClientIP } from '../src/lib/server-logger';
+
+// Helper para extrair IP do request (inline para evitar import externo)
+function getClientIP(headers: Record<string, string | string[] | undefined>): string {
+  const forwarded = headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    return forwarded.split(',')[0].trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0) {
+    return forwarded[0].split(',')[0].trim();
+  }
+  return 'unknown';
+}
 
 // CORS - Domínios permitidos
 const ALLOWED_ORIGINS = [
@@ -118,24 +129,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Rate limiting
   if (!checkRateLimit(ip)) {
-    await serverLog({
-      module: 'API',
-      action: 'interpret_rate_limited',
-      success: false,
-      ip,
-    });
+    console.error('[API] Rate limited:', ip);
     return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
   }
 
   // Check API key
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    await serverLog({
-      module: 'API',
-      action: 'interpret_config_error',
-      success: false,
-      message: 'Missing OPENAI_API_KEY',
-    });
+    console.error('[API] Missing OPENAI_API_KEY');
     return res.status(500).json({ error: 'Server configuration error' });
   }
 
@@ -201,14 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!whisperResponse.ok) {
       const error = await whisperResponse.text();
-      await serverLog({
-        module: 'Voice',
-        action: 'whisper_error',
-        success: false,
-        duration_ms: Date.now() - startTime,
-        ip,
-        context: { error },
-      });
+      console.error('[Voice] Whisper error:', error);
       return res.status(500).json({ error: 'Transcription failed' });
     }
 
@@ -236,14 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!gptResponse.ok) {
       const error = await gptResponse.text();
-      await serverLog({
-        module: 'Voice',
-        action: 'gpt_error',
-        success: false,
-        duration_ms: Date.now() - startTime,
-        ip,
-        context: { error, transcription: transcribedText },
-      });
+      console.error('[Voice] GPT error:', error, 'transcription:', transcribedText);
       return res.status(500).json({ error: 'Interpretation failed' });
     }
 
@@ -252,26 +239,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const parsed = JSON.parse(content);
 
     // Log success
-    await serverLog({
-      module: 'Voice',
-      action: 'interpret',
-      success: true,
-      duration_ms: Date.now() - startTime,
-      ip,
-      context: { transcription: transcribedText, expression: parsed.expression },
-    });
+    console.log('[Voice] Success:', { transcription: transcribedText, expression: parsed.expression, duration_ms: Date.now() - startTime });
 
     return res.status(200).json(parsed);
 
   } catch (error) {
-    await serverLog({
-      module: 'API',
-      action: 'interpret_exception',
-      success: false,
-      duration_ms: Date.now() - startTime,
-      message: String(error),
-      ip,
-    });
+    console.error('[API] Exception:', String(error));
     return res.status(500).json({ error: 'Server processing error' });
   }
 }
