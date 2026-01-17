@@ -3,18 +3,7 @@
 // Vercel Serverless Function
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-// Helper para extrair IP do request (inline para evitar import externo)
-function getClientIP(headers: Record<string, string | string[] | undefined>): string {
-  const forwarded = headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return forwarded[0].split(',')[0].trim();
-  }
-  return 'unknown';
-}
+import { log, error, getClientIP } from './_lib/logger';
 
 // CORS - Domínios permitidos
 const ALLOWED_ORIGINS = [
@@ -44,14 +33,14 @@ function checkRateLimit(ip: string): boolean {
   const now = Date.now();
   const requests = rateLimitMap.get(ip) || [];
   const recent = requests.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
-  
+
   if (recent.length >= RATE_LIMIT_MAX_REQUESTS) {
     return false;
   }
-  
+
   recent.push(now);
   rateLimitMap.set(ip, recent);
-  
+
   // Limpa entries antigas periodicamente
   if (rateLimitMap.size > 10000) {
     for (const [key, times] of rateLimitMap.entries()) {
@@ -60,7 +49,7 @@ function checkRateLimit(ip: string): boolean {
       }
     }
   }
-  
+
   return true;
 }
 
@@ -129,14 +118,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Rate limiting
   if (!checkRateLimit(ip)) {
-    console.error('[API] Rate limited:', ip);
+    error('API', 'rate_limited', 'Too many requests', { ip });
     return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
   }
 
   // Check API key
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.error('[API] Missing OPENAI_API_KEY');
+    error('API', 'config_error', 'Missing OPENAI_API_KEY');
     return res.status(500).json({ error: 'Server configuration error' });
   }
 
@@ -144,31 +133,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Parse multipart form data
     // Vercel Edge functions handle this differently, for Node runtime:
     const chunks: Buffer[] = [];
-    
+
     await new Promise<void>((resolve, reject) => {
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
       req.on('end', () => resolve());
       req.on('error', reject);
     });
-    
+
     const body = Buffer.concat(chunks);
-    
+
     // Extract audio file from multipart
     const boundary = req.headers['content-type']?.split('boundary=')[1];
     if (!boundary) {
       return res.status(400).json({ error: 'Invalid content type' });
     }
-    
+
     // Simple multipart parser
     const parts = body.toString('binary').split(`--${boundary}`);
     let audioData: Buffer | null = null;
     let filename = 'audio.webm';
-    
+
     for (const part of parts) {
       if (part.includes('filename=')) {
         const filenameMatch = part.match(/filename="([^"]+)"/);
         if (filenameMatch) filename = filenameMatch[1];
-        
+
         const headerEnd = part.indexOf('\r\n\r\n');
         if (headerEnd !== -1) {
           const content = part.slice(headerEnd + 4);
@@ -178,7 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
     }
-    
+
     if (!audioData || audioData.length === 0) {
       return res.status(400).json({ error: 'No audio file uploaded' });
     }
@@ -201,8 +190,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!whisperResponse.ok) {
-      const error = await whisperResponse.text();
-      console.error('[Voice] Whisper error:', error);
+      const errText = await whisperResponse.text();
+      error('Voice', 'whisper_error', 'Transcription failed', { error: errText, duration_ms: Date.now() - startTime });
       return res.status(500).json({ error: 'Transcription failed' });
     }
 
@@ -229,8 +218,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!gptResponse.ok) {
-      const error = await gptResponse.text();
-      console.error('[Voice] GPT error:', error, 'transcription:', transcribedText);
+      const errText = await gptResponse.text();
+      error('Voice', 'gpt_error', 'Interpretation failed', { error: errText, transcription: transcribedText });
       return res.status(500).json({ error: 'Interpretation failed' });
     }
 
@@ -239,12 +228,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const parsed = JSON.parse(content);
 
     // Log success
-    console.log('[Voice] Success:', { transcription: transcribedText, expression: parsed.expression, duration_ms: Date.now() - startTime });
+    log({
+      module: 'Voice',
+      action: 'interpret',
+      success: true,
+      duration_ms: Date.now() - startTime,
+      ip,
+      context: { transcription: transcribedText, expression: parsed.expression },
+    });
 
     return res.status(200).json(parsed);
 
-  } catch (error) {
-    console.error('[API] Exception:', String(error));
+  } catch (err) {
+    error('API', 'exception', String(err), { duration_ms: Date.now() - startTime });
     return res.status(500).json({ error: 'Server processing error' });
   }
 }
