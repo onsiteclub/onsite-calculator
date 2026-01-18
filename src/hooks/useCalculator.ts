@@ -3,17 +3,27 @@
 
 import { useState, useCallback } from 'react';
 import { calculate, type CalculationResult } from '../lib/calculator';
+import { saveCalculation, type InputMethod } from '../lib/calculations';
+
+interface SaveOptions {
+  userId?: string;
+  inputMethod?: InputMethod;
+  voiceLogId?: string;
+  tradeContext?: string;
+  appVersion?: string;
+}
 
 interface UseCalculatorReturn {
   expression: string;
   setExpression: (value: string) => void;
-  setExpressionAndCompute: (value: string) => CalculationResult | null;
+  setExpressionAndCompute: (value: string, saveOptions?: SaveOptions) => CalculationResult | null;
   displayValue: string;
   lastResult: CalculationResult | null;
   justCalculated: boolean;
+  lastCalculationId: string | null;
 
   // Ações
-  compute: () => CalculationResult | null;
+  compute: (saveOptions?: SaveOptions) => CalculationResult | null;
   clear: () => void;
   backspace: () => void;
   appendKey: (key: string) => void;
@@ -30,14 +40,22 @@ export function useCalculator(): UseCalculatorReturn {
   const [displayValue, setDisplayValue] = useState('0');
   const [lastResult, setLastResult] = useState<CalculationResult | null>(null);
   const [justCalculated, setJustCalculated] = useState(false);
+  const [lastCalculationId, setLastCalculationId] = useState<string | null>(null);
 
   // Calcular resultado
-  const compute = useCallback(() => {
+  const compute = useCallback((saveOptions?: SaveOptions) => {
     const result = calculate(expression);
     if (result) {
       setDisplayValue(result.resultFeetInches);
       setLastResult(result);
       setJustCalculated(true);
+
+      // Salvar cálculo no banco (async, não bloqueia)
+      if (saveOptions?.userId) {
+        saveCalculation(result, saveOptions).then(id => {
+          if (id) setLastCalculationId(id);
+        });
+      }
     }
     return result;
   }, [expression]);
@@ -107,13 +125,20 @@ export function useCalculator(): UseCalculatorReturn {
   }, []);
 
   // Seta expressão e calcula imediatamente (para voice input)
-  const setExpressionAndCompute = useCallback((value: string) => {
+  const setExpressionAndCompute = useCallback((value: string, saveOptions?: SaveOptions) => {
     setExpression(value);
     const result = calculate(value);
     if (result) {
       setDisplayValue(result.resultFeetInches);
       setLastResult(result);
       setJustCalculated(true);
+
+      // Salvar cálculo no banco (async, não bloqueia)
+      if (saveOptions?.userId) {
+        saveCalculation(result, saveOptions).then(id => {
+          if (id) setLastCalculationId(id);
+        });
+      }
     }
     return result;
   }, []);
@@ -125,6 +150,7 @@ export function useCalculator(): UseCalculatorReturn {
     displayValue,
     lastResult,
     justCalculated,
+    lastCalculationId,
     compute,
     clear,
     backspace,

@@ -3,6 +3,14 @@
 // Vercel Serverless Function
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import {
+  canCollectVoice,
+  saveVoiceLog,
+  extractEntities,
+  detectInformalTerms,
+  detectLanguage,
+  type VoiceLogRecord,
+} from './lib/voice-logs';
 
 // Helper para extrair IP do request
 function getClientIP(headers: Record<string, string | string[] | undefined>): string {
@@ -158,8 +166,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const parts = body.toString('binary').split(`--${boundary}`);
     let audioData: Buffer | null = null;
     let filename = 'audio.webm';
+    let userId: string | undefined;
 
     for (const part of parts) {
+      // Extract user_id field if present
+      if (part.includes('name="user_id"')) {
+        const headerEnd = part.indexOf('\r\n\r\n');
+        if (headerEnd !== -1) {
+          const content = part.slice(headerEnd + 4).trim();
+          userId = content.replace(/\r\n--$/, '').replace(/--\r\n$/, '').trim();
+        }
+      }
+
       if (part.includes('filename=')) {
         const filenameMatch = part.match(/filename="([^"]+)"/);
         if (filenameMatch) filename = filenameMatch[1];
@@ -231,9 +249,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const content = gptResult.choices[0]?.message?.content || '{}';
     const parsed = JSON.parse(content);
 
-    console.log('[Voice] Success:', { transcription: transcribedText, expression: parsed.expression, duration_ms: Date.now() - startTime });
+    const durationMs = Date.now() - startTime;
+    console.log('[Voice] Success:', { transcription: transcribedText, expression: parsed.expression, duration_ms: durationMs });
 
-    return res.status(200).json(parsed);
+    // 3. Salvar voice_log se usuário tiver consentimento
+    let voiceLogId: string | null = null;
+    if (userId) {
+      const hasConsent = await canCollectVoice(userId);
+      if (hasConsent) {
+        const voiceLog: VoiceLogRecord = {
+          user_id: userId,
+          feature_context: 'main_calculator',
+          audio_format: 'webm',
+          transcription_raw: transcribedText,
+          transcription_normalized: parsed.expression,
+          transcription_engine: 'whisper-1',
+          language_detected: detectLanguage(transcribedText),
+          intent_detected: 'calculate',
+          intent_fulfilled: !!parsed.expression,
+          entities: extractEntities(parsed.expression || ''),
+          informal_terms: detectInformalTerms(transcribedText),
+          was_successful: !!parsed.expression,
+        };
+
+        voiceLogId = await saveVoiceLog(voiceLog);
+        if (voiceLogId) {
+          console.log('[Voice] Saved voice_log:', voiceLogId);
+        }
+      }
+    }
+
+    return res.status(200).json({
+      ...parsed,
+      voice_log_id: voiceLogId, // Retornar ID para vincular ao calculation
+    });
 
   } catch (err) {
     console.error('[API] Exception:', String(err));
