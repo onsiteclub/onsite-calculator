@@ -5,7 +5,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useCalculator, useOnlineStatus, useVoiceRecorder, useCalculatorHistory } from '../hooks';
 import { logger } from '../lib/logger';
-import { hasConsent } from '../lib/consent';
+import { getConsentStatus } from '../lib/consent';
 import { HistoryModal } from './HistoryModal';
 import VoiceConsentModal from './VoiceConsentModal';
 import type { VoiceState, VoiceResponse } from '../types/calculator';
@@ -74,14 +74,15 @@ export default function Calculator({
 
     const checkVoiceConsent = async () => {
       try {
-        const granted = await hasConsent(userId, 'voice_training');
-        setHasVoiceConsent(granted);
+        // getConsentStatus retorna: true (concedeu), false (recusou), null (nunca perguntou)
+        const status = await getConsentStatus(userId, 'voice_training');
+        setHasVoiceConsent(status);
         setVoiceConsentChecked(true);
-        console.log('[Calculator] Voice consent checked:', granted);
+        console.log('[Calculator] Voice consent status:', status);
       } catch (err) {
         console.warn('[Calculator] Error checking voice consent:', err);
-        // Em caso de erro, marca como verificado mas sem consentimento
-        setHasVoiceConsent(false);
+        // Em caso de erro, deixa como null para perguntar
+        setHasVoiceConsent(null);
         setVoiceConsentChecked(true);
       }
     };

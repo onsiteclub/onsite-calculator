@@ -56,6 +56,45 @@ export async function hasConsent(
 }
 
 /**
+ * Verifica o status de consentimento do usuário
+ * Retorna: true (concedeu), false (recusou), null (nunca perguntou)
+ */
+export async function getConsentStatus(
+  userId: string,
+  consentType: ConsentType
+): Promise<boolean | null> {
+  if (!isSupabaseEnabled() || !supabase) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('consents')
+      .select('granted')
+      .eq('user_id', userId)
+      .eq('consent_type', consentType)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.warn('[Consent] Error checking consent status:', error.message);
+      return null;
+    }
+
+    // Se não existe registro, retorna null (nunca perguntou)
+    if (!data || data.length === 0) {
+      return null;
+    }
+
+    // Retorna o valor de granted (true ou false)
+    return data[0].granted;
+  } catch (err) {
+    console.error('[Consent] Exception checking consent status:', err);
+    return null;
+  }
+}
+
+/**
  * Verifica se pode coletar dados de voz do usuário
  * Conforme definido no [LOCKED] VERIFICAÇÃO DE CONSENTIMENTO
  */
