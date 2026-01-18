@@ -25,6 +25,7 @@ export interface Token {
 export interface VoiceResponse {
   expression: string;
   error?: string;
+  voice_log_id?: string;
 }
 
 export interface HistoryEntry {

@@ -134,6 +134,7 @@ export default function App() {
       onVoiceUpgradeClick={handleUpgradeClick}
       onSignOut={signOut}
       userName={profile?.nome || profile?.email || user?.email}
+      userId={user?.id}
     />
   );
 }

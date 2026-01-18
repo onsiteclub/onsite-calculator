@@ -47,6 +47,7 @@ interface CalculatorProps {
   onVoiceUpgradeClick: () => void;
   onSignOut: () => void;
   userName?: string;
+  userId?: string;
 }
 
 export default function Calculator({
@@ -56,6 +57,7 @@ export default function Calculator({
   onVoiceUpgradeClick,
   onSignOut,
   userName,
+  userId,
 }: CalculatorProps) {
   const isOnline = useOnlineStatus();
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -110,7 +112,11 @@ export default function Calculator({
 
       if (data.expression) {
         // Usa setExpressionAndCompute para atualizar expressão E calcular o resultado
-        const result = setExpressionAndCompute(data.expression);
+        const result = setExpressionAndCompute(data.expression, {
+          userId,
+          inputMethod: 'voice',
+          voiceLogId: data.voice_log_id,
+        });
         logger.voice.apiCall(duration, true, {
           status: response.status,
           expression: data.expression,
@@ -132,7 +138,7 @@ export default function Calculator({
     } finally {
       setVoiceState('idle');
     }
-  }, [setExpressionAndCompute, setVoiceState, addToHistory]);
+  }, [setExpressionAndCompute, setVoiceState, addToHistory, userId]);
 
   const { startRecording, stopRecording } = useVoiceRecorder({
     onRecordingComplete: handleAudioUpload,
@@ -181,7 +187,7 @@ export default function Calculator({
   const handleKeyClick = (key: string) => {
     switch (key) {
       case '=': {
-        const result = compute();
+        const result = compute({ userId, inputMethod: 'keypad' });
         if (result) {
           addToHistory(result);
         }
@@ -302,7 +308,7 @@ export default function Calculator({
               onChange={(e) => setExpression(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  const result = compute();
+                  const result = compute({ userId, inputMethod: 'keypad' });
                   if (result) {
                     addToHistory(result);
                   }

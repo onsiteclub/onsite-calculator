@@ -84,13 +84,17 @@ export async function saveCalculation(
 ): Promise<string | null> {
   // Não salvar se Supabase não está disponível
   if (!isSupabaseEnabled() || !supabase) {
+    console.log('[Calculations] Supabase not enabled, skipping save');
     return null;
   }
 
   // Não salvar se não tiver usuário (modo anônimo)
   if (!options.userId) {
+    console.log('[Calculations] No userId provided, skipping save');
     return null;
   }
+
+  console.log('[Calculations] Saving calculation for user:', options.userId);
 
   try {
     const record: CalculationRecord = {
@@ -115,10 +119,11 @@ export async function saveCalculation(
       .single();
 
     if (error) {
-      console.warn('[Calculations] Error saving:', error.message);
+      console.error('[Calculations] Error saving:', error.message, error);
       return null;
     }
 
+    console.log('[Calculations] Saved successfully:', data?.id);
     return data?.id || null;
   } catch (err) {
     console.error('[Calculations] Exception saving:', err);
