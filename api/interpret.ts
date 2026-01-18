@@ -10,8 +10,8 @@ import {
   detectInformalTerms,
   detectLanguage,
   type VoiceLogRecord,
-} from './lib/voice-logs';
-import { apiLogger } from './lib/api-logger';
+} from './lib/voice-logs.js';
+import { apiLogger } from './lib/api-logger.js';
 
 // Helper para extrair IP do request
 function getClientIP(headers: Record<string, string | string[] | undefined>): string {
