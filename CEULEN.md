@@ -2,7 +2,7 @@
 
 > **ESTE CABEÇALHO É IMUTÁVEL. NÃO ALTERE AS SEÇÕES MARCADAS COM [LOCKED].**
 >
-> Última sincronização com Blue: 2025-01-17
+> Última sincronização com Blue: 2025-01-18
 
 ---
 
@@ -47,6 +47,58 @@
 3. **Conflitos de diretriz → pergunto a Blue.** Formato: `@Blue: [descrição do conflito]`
 4. **Coleta de dados é prioridade.** Minha missão secundária é alimentar o schema central.
 5. **Voz só com consentimento.** Só coleto voice_logs se usuário tiver `voice_training=true`.
+
+---
+
+## [LOCKED] REGRA ANTI-DUCT-TAPE
+
+```
+╔════════════════════════════════════════════════════════════════════════╗
+║  REGRA: NUNCA "fazer passar" — sempre "fazer certo"                    ║
+╚════════════════════════════════════════════════════════════════════════╝
+```
+
+**Antes de implementar qualquer fix:**
+
+1. Identificar a **CAUSA RAIZ**, não o sintoma
+2. Perguntar: "Essa solução preserva ou sacrifica funcionalidade?"
+3. Perguntar: "Estou removendo código/dados para evitar um erro?"
+4. **Se a resposta for SIM → PARAR e repensar**
+
+**O objetivo nunca é "ausência de erro".**
+**O objetivo é "presença de valor alinhado com a missão".**
+
+```
+Caminho fácil ≠ Caminho certo
+```
+
+---
+
+## [LOCKED] REGRA DE SCHEMA SUPABASE
+
+```
+╔════════════════════════════════════════════════════════════════════════╗
+║  REGRA: NUNCA sacrificar dados para resolver erros de schema           ║
+╚════════════════════════════════════════════════════════════════════════╝
+```
+
+**Se um erro indicar:**
+- "Column X does not exist"
+- "Could not find column X"
+- "PGRST204" ou similar
+
+**A solução CORRETA é:**
+→ Criar migration para **ADICIONAR** a coluna ao schema
+→ Solicitar a Blue para criar/aprovar a migration
+
+**A solução PROIBIDA é:**
+→ Remover o campo do código para "fazer passar"
+→ Ignorar dados que APIs externas nos enviam
+
+```
+Dados que APIs externas (Stripe, etc.) nos enviam são VALIOSOS.
+O schema se adapta aos dados. O código não descarta dados.
+```
 
 ---
 
@@ -280,10 +332,10 @@ Ao iniciar sessão, ler este documento e verificar:
 
 ---
 
-# OnSite Calculator — Arquitetura v4.3 (Full System Map)
+# OnSite Calculator — Arquitetura v4.5 (Full System Map)
 
 **STATUS:** ✅ Mapeamento completo (Core + Hooks + UI + Auth/Paywall + Voz + Logging + Data Collection + Android Native)
-**ÚLTIMA ATUALIZAÇÃO:** 2026-01-17
+**ÚLTIMA ATUALIZAÇÃO:** 2026-01-18
 **OBJETIVO:** Documentação técnica profunda para **evitar duplicação de lógica**, garantir consistência e permitir que uma IA faça alterações sem criar "arquiteturas paralelas".
 
 ---
@@ -699,25 +751,30 @@ export interface UserProfile {
 }
 ```
 
-### 8.3 Tabela `subscriptions` (Verificação de Acesso)
+### 8.3 Tabela `billing_subscriptions` (Verificação de Acesso)
 
 **Estrutura**:
 ```ts
 interface SubscriptionData {
   id: string;
   user_id: string;           // UUID do Supabase Auth
-  app: string;               // 'calculator'
+  app_name: string;          // 'calculator' (EXATAMENTE este valor)
   status: 'active' | 'trialing' | 'canceled' | 'past_due' | 'inactive';
   current_period_end?: string;
   cancel_at_period_end?: boolean;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
 }
 ```
 
 **Verificação de acesso** (`src/lib/subscription.ts`):
-- Fonte única: tabela `subscriptions` no Supabase
+- Fonte única: tabela `billing_subscriptions` no Supabase
+- Query: `.from('billing_subscriptions').eq('user_id', id).eq('app_name', 'calculator')`
 - Cache local: 5 minutos (memória + Capacitor Preferences)
 - Status válidos: `active` ou `trialing`
 - Também verifica `current_period_end` não expirado
+
+**IMPORTANTE**: O Auth Hub (Hermes) é responsável por inserir registros nesta tabela após pagamento Stripe bem-sucedido.
 
 ### 8.4 Gate do Voice (pago)
 
@@ -725,21 +782,51 @@ interface SubscriptionData {
 - `Calculator.tsx` recebe `hasVoiceAccess` e `voiceState`
 - Se não tiver acesso → botão de mic redireciona DIRETO para checkout (sem popup)
 
-### 8.5 Checkout Externo (v4.1 - Simplificado)
+### 8.5 Checkout Externo (v4.4 - JWT + Auth Hub)
 
 **Fluxo direto** (sem popup intermediário):
-1. Usuário clica no botão de voz (sem acesso)
+1. Usuário clica no botão de upgrade
 2. `App.tsx` chama `handleUpgradeClick()`
-3. Gera JWT token via `/api/checkout-token`
-4. Redireciona direto para `https://auth.onsiteclub.ca/checkout/calculator`
-5. Usuário completa pagamento
-6. Checkout grava na tabela `subscriptions`
-7. Redirect via deep link → App verifica e libera Voice
+3. Obtém `session.access_token` do Supabase
+4. Chama `POST /api/checkout-token` com Bearer token
+5. API valida token e gera JWT assinado (HS256)
+6. Redireciona para `https://onsite-auth.vercel.app/checkout/calculator?token=JWT`
+7. Auth Hub (Hermes) valida JWT e cria checkout Stripe
+8. Após pagamento, Auth Hub grava na tabela `billing_subscriptions`
+9. Redirect via deep link `onsitecalculator://auth-callback`
+10. App executa `refreshProfile()` → `checkPremiumAccess()` → libera Voice
 
-**Parâmetros enviados**:
-- `token`: JWT assinado com `user_id` (gerado por `/api/checkout-token`)
-- `prefilled_email`: Email do usuário
-- `redirect`: `onsitecalculator://auth-callback`
+**JWT Payload** (gerado por `/api/checkout-token`):
+```json
+{
+  "sub": "user-uuid",           // user_id
+  "email": "user@example.com",  // email
+  "app": "calculator",          // app identifier
+  "iat": 1234567890,            // issued at
+  "exp": 1234568190,            // expira em 5 min
+  "jti": "unique-id"            // request ID
+}
+```
+
+**URL Final enviada ao Auth Hub**:
+```
+https://onsite-auth.vercel.app/checkout/calculator
+  ?token=eyJhbGciOiJIUzI1NiIs...
+  &prefilled_email=user@example.com
+  &redirect=onsitecalculator://auth-callback
+```
+
+**Secret compartilhado**: `CHECKOUT_JWT_SECRET` (configurado em Calculator Vercel + Auth Hub)
+
+**O que Auth Hub (Hermes) deve fazer**:
+1. Validar JWT com `CHECKOUT_JWT_SECRET` (HS256)
+2. Verificar `exp` não expirou
+3. Criar checkout Stripe com `email` do payload
+4. Após pagamento OK, inserir em `billing_subscriptions`:
+   - `user_id` = `payload.sub`
+   - `app_name` = `'calculator'` (EXATAMENTE)
+   - `status` = `'active'`
+5. Redirect para `onsitecalculator://auth-callback`
 
 ### 8.6 Botão de Logout
 
@@ -860,8 +947,9 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 ### Arquivos em `api/`
 - `interpret.ts` - API de voz (Whisper + GPT-4o + saveVoiceLog)
-- `checkout-token.ts` - Geração de JWT para checkout
+- `checkout-token.ts` - Geração de JWT para checkout (HS256)
 - `lib/voice-logs.ts` - Persistência de voice_logs (server-side, Blueprint)
+- `lib/api-logger.ts` - Logger server-side para app_logs (v4.4)
 
 ---
 
@@ -904,6 +992,27 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - [ ] Padronizar parsing de voz em modulo unico (evitar regex solta na UI)
 
 ### Changelog
+
+**v4.5 (2026-01-18) - Data Collection Complete**
+- Fix: userId não era passado para compute() - agora salva calculations corretamente
+- Fix: ESM imports na API (adicionado .js extension para Vercel)
+- Fix: CORS para Vercel preview deployments (*.vercel.app)
+- Verificado: calculations salvando no Supabase (testado e confirmado)
+- Verificado: app_logs salvando no Supabase (testado e confirmado)
+- Verificado: Voice API funcionando (Whisper + GPT-4o + logging)
+- Verificado: billing_subscriptions integrado com Stripe via Auth Hub
+- Pendente: UI de consentimento voice_training para habilitar voice_logs
+
+**v4.4 (2026-01-18) - Subscription Fix & Comprehensive Logging**
+- Fix CRÍTICO: Corrigido nome da tabela `subscriptions` → `billing_subscriptions`
+- Fix CRÍTICO: Corrigido nome da coluna `app` → `app_name`
+- Adicionado `api/lib/api-logger.ts` - Logger server-side para API
+- Adicionado logs de cálculo no `useCalculator.ts` (success/fail, inputMethod)
+- Adicionado logs de voz no `api/interpret.ts` (Whisper, GPT, rate limiting)
+- Adicionado `app_name: 'calculator'` em todos os logs do cliente
+- AuthScreen simplificado: apenas email + senha (mínima fricção)
+- Auto-signup quando login falha para usuário novo
+- Documentação completa do fluxo JWT para Auth Hub (Hermes)
 
 **v4.3 (2026-01-17) - Blueprint Schema Implementation**
 - Implementado `calculations.sql` - Schema para tabela de calculos
@@ -950,4 +1059,4 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 *Ceulen — Agente Calculator*
 *Subordinado a Blueprint (Blue)*
-*Última sync: 2026-01-17*
+*Última sync: 2026-01-18 (v4.5 - Data Collection Complete)*
