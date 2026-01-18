@@ -34,14 +34,14 @@ export interface CalculationRecord {
 /**
  * Detecta o tipo de cálculo baseado na expressão
  */
-function detectCalcType(expression: string, isInchMode: boolean): CalcType {
+function detectCalcType(_expression: string, isInchMode: boolean): CalcType {
   // Se tem medidas de construção
   if (isInchMode) {
     return 'length';
   }
 
-  // Detectar conversões (futuro)
-  // if (expression.includes('to') || expression.includes('→')) {
+  // TODO: Detectar conversões quando implementado
+  // if (_expression.includes('to') || _expression.includes('→')) {
   //   return 'conversion';
   // }
 

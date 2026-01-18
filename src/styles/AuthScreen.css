@@ -1,5 +1,5 @@
 /* src/styles/AuthScreen.css */
-/* Estilos para a tela de autenticação */
+/* Estilos para a tela de autenticação - mínima fricção */
 
 .auth-screen {
   min-height: 100vh;
@@ -14,7 +14,7 @@
   background: white;
   border-radius: 16px;
   padding: 32px;
-  max-width: 440px;
+  max-width: 400px;
   width: 100%;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
 }
@@ -32,8 +32,9 @@
   margin-bottom: 12px;
 }
 
-.logo-icon {
-  font-size: 32px;
+.logo-image {
+  height: 40px;
+  width: auto;
 }
 
 .auth-logo h1 {
@@ -64,12 +65,6 @@
   border: 1px solid #fc8181;
 }
 
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
 .form-group {
   display: flex;
   flex-direction: column;
@@ -82,8 +77,7 @@
   color: #2d3748;
 }
 
-.form-group input,
-.form-group select {
+.form-group input {
   padding: 12px 16px;
   border: 2px solid #e2e8f0;
   border-radius: 8px;
@@ -93,52 +87,44 @@
   background: white;
 }
 
-.form-group input:focus,
-.form-group select:focus {
+.form-group input:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.form-group select {
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23718096' d='M10.293 3.293L6 7.586 1.707 3.293A1 1 0 00.293 4.707l5 5a1 1 0 001.414 0l5-5a1 1 0 10-1.414-1.414z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 36px;
-}
-
-.trial-badge {
-  background: linear-gradient(135deg, #f6f8fb 0%, #e9ecef 100%);
-  border: 2px solid #cbd5e0;
-  border-radius: 12px;
-  padding: 16px;
-  margin-top: 8px;
-}
-
-.trial-header {
+/* Password input with toggle */
+.password-input-wrapper {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
 }
 
-.trial-tag {
-  background: #48bb78;
-  color: white;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 4px 8px;
-  border-radius: 4px;
+.password-input-wrapper input {
+  width: 100%;
+  padding-right: 48px;
 }
 
-.trial-text {
-  font-size: 13px;
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #718096;
+  transition: color 0.2s;
+}
+
+.password-toggle:hover {
   color: #4a5568;
-  margin: 0;
-  line-height: 1.5;
+}
+
+.password-toggle:focus {
+  outline: none;
 }
 
 .auth-button {
@@ -153,6 +139,24 @@
   cursor: pointer;
   transition: all 0.2s;
   margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Spinner animation */
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .auth-button:hover:not(:disabled) {
@@ -169,44 +173,11 @@
   cursor: not-allowed;
 }
 
-.auth-footer {
-  text-align: center;
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid #e2e8f0;
-}
-
-.auth-footer p {
-  font-size: 14px;
-  color: #718096;
-  margin: 0;
-}
-
-.auth-link {
-  color: #667eea;
-  font-weight: 600;
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
-  font-size: inherit;
-}
-
-.auth-link:hover:not(:disabled) {
-  color: #764ba2;
-}
-
-.auth-link:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .terms-text {
   font-size: 11px;
   color: #a0aec0;
   text-align: center;
-  margin-top: 16px;
+  margin-top: 20px;
   line-height: 1.5;
 }
 
@@ -221,15 +192,11 @@
     padding: 24px;
   }
 
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-
   .auth-logo h1 {
     font-size: 20px;
   }
 
-  .logo-icon {
-    font-size: 28px;
+  .logo-image {
+    height: 32px;
   }
 }

@@ -17,15 +17,9 @@ interface AuthState {
 
 interface UseAuthReturn extends AuthState {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, metadata: SignUpMetadata) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-}
-
-interface SignUpMetadata {
-  firstName: string;
-  lastName: string;
-  trade?: string;
 }
 
 export function useAuth(): UseAuthReturn {
@@ -157,7 +151,7 @@ export function useAuth(): UseAuthReturn {
   // Login
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) {
-      return { error: 'Autenticação não disponível' };
+      return { error: 'Authentication not available' };
     }
 
     try {
@@ -175,31 +169,20 @@ export function useAuth(): UseAuthReturn {
       return { error: null };
     } catch (err) {
       logger.auth.error('Sign in exception', { error: String(err) });
-      return { error: 'Erro ao fazer login. Tente novamente.' };
+      return { error: 'Error signing in. Please try again.' };
     }
   }, []);
 
-  // Cadastro
-  const signUp = useCallback(async (
-    email: string,
-    password: string,
-    metadata: SignUpMetadata
-  ) => {
+  // Cadastro (apenas email e senha - mínima fricção)
+  const signUp = useCallback(async (email: string, password: string) => {
     if (!supabase) {
-      return { error: 'Autenticação não disponível' };
+      return { error: 'Authentication not available' };
     }
 
     try {
       const { error } = await supabase.auth.signUp({
         email,
         password,
-        options: {
-          data: {
-            first_name: metadata.firstName,
-            last_name: metadata.lastName,
-            trade: metadata.trade || '',
-          },
-        },
       });
 
       if (error) {
@@ -211,7 +194,7 @@ export function useAuth(): UseAuthReturn {
       return { error: null };
     } catch (err) {
       logger.auth.error('Sign up exception', { error: String(err) });
-      return { error: 'Erro ao criar conta. Tente novamente.' };
+      return { error: 'Error creating account. Please try again.' };
     }
   }, []);
 
@@ -270,10 +253,10 @@ export function useAuth(): UseAuthReturn {
 // Formata mensagens de erro do Supabase
 function formatAuthError(message: string): string {
   const errorMap: Record<string, string> = {
-    'Invalid login credentials': 'Email ou senha incorretos',
-    'Email not confirmed': 'Email não confirmado. Verifique sua caixa de entrada.',
-    'User already registered': 'Este email já está cadastrado',
-    'Password should be at least 6 characters': 'A senha deve ter pelo menos 6 caracteres',
+    'Invalid login credentials': 'Invalid email or password',
+    'Email not confirmed': 'Email not confirmed. Check your inbox.',
+    'User already registered': 'This email is already registered',
+    'Password should be at least 6 characters': 'Password must be at least 6 characters',
   };
 
   return errorMap[message] || message;
