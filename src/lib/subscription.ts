@@ -95,12 +95,11 @@ export async function hasActiveSubscription(): Promise<boolean> {
     }
 
     // Busca subscription específica do calculator
-    // Tenta tanto 'calculator' quanto 'calculator-pro' para compatibilidade
     const { data, error } = await supabase
       .from('billing_subscriptions')
       .select('*')
       .eq('user_id', user.id)
-      .in('app', ['calculator', 'calculator-pro', 'onsite-calculator'])
+      .eq('app_name', 'calculator')
       .maybeSingle();
 
     // PGRST116 = "No rows found" - isso é esperado para usuários sem assinatura
