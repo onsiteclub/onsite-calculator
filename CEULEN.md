@@ -943,6 +943,7 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - `Calculator.tsx` - Componente principal
 - `AuthScreen.tsx` - Tela de login/signup
 - `HistoryModal.tsx` - Modal de histórico
+- `VoiceConsentModal.tsx` - Modal de consentimento para voice_training (v4.6)
 - `VoiceUpgradePopup.tsx` - (não usado, pode ser deletado)
 
 ### Arquivos em `api/`
@@ -988,10 +989,19 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - [x] Implementar coleta de `calculations` no codigo (useCalculator + calculations.ts)
 - [x] Implementar coleta de `voice_logs` no codigo (api/interpret.ts + api/lib/voice-logs.ts)
 - [x] Implementar verificacao de consentimento (consent.ts + canCollectVoice)
-- [ ] Implementar UI de consentimento `voice_training`
+- [x] Implementar UI de consentimento `voice_training` (VoiceConsentModal.tsx)
 - [ ] Padronizar parsing de voz em modulo unico (evitar regex solta na UI)
 
 ### Changelog
+
+**v4.6 (2026-01-18) - Voice Consent UI**
+- Novo: VoiceConsentModal.tsx - Modal de consentimento para voice_training
+- Novo: Verificação de consentimento no primeiro uso do microfone
+- Novo: Salva resposta na tabela `consents` com consent_type='voice_training'
+- Novo: Logger de consent (consent.prompted, consent.granted)
+- Integrado: Modal aparece automaticamente antes da primeira gravação
+- UX: Se usuário aceita, gravação inicia automaticamente após consentir
+- CSS: Estilos específicos para modal de consentimento (.consent-modal, .consent-details)
 
 **v4.5 (2026-01-18) - Data Collection Complete**
 - Fix: userId não era passado para compute() - agora salva calculations corretamente
@@ -1001,7 +1011,6 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - Verificado: app_logs salvando no Supabase (testado e confirmado)
 - Verificado: Voice API funcionando (Whisper + GPT-4o + logging)
 - Verificado: billing_subscriptions integrado com Stripe via Auth Hub
-- Pendente: UI de consentimento voice_training para habilitar voice_logs
 
 **v4.4 (2026-01-18) - Subscription Fix & Comprehensive Logging**
 - Fix CRÍTICO: Corrigido nome da tabela `subscriptions` → `billing_subscriptions`
@@ -1059,4 +1068,4 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 *Ceulen — Agente Calculator*
 *Subordinado a Blueprint (Blue)*
-*Última sync: 2026-01-18 (v4.5 - Data Collection Complete)*
+*Última sync: 2026-01-18 (v4.6 - Voice Consent UI)*

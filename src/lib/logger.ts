@@ -247,6 +247,15 @@ export const logger = {
     error: (message: string, context?: Record<string, unknown>) =>
       log({ level: 'error', module: 'History', action: 'error', message, context }),
   },
+
+  consent: {
+    prompted: (consentType: string) =>
+      log({ level: 'info', module: 'Auth', action: 'consent_prompted', context: { consentType } }),
+    granted: (consentType: string, granted: boolean) =>
+      log({ level: 'info', module: 'Auth', action: 'consent_granted', success: granted, context: { consentType, granted } }),
+    error: (message: string, context?: Record<string, unknown>) =>
+      log({ level: 'error', module: 'Auth', action: 'consent_error', message, context }),
+  },
 };
 
 // Força flush antes de fechar o app

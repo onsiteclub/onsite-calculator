@@ -1,11 +1,13 @@
 // src/components/Calculator.tsx
 // Componente principal da calculadora
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useCalculator, useOnlineStatus, useVoiceRecorder, useCalculatorHistory } from '../hooks';
 import { logger } from '../lib/logger';
+import { hasConsent } from '../lib/consent';
 import { HistoryModal } from './HistoryModal';
+import VoiceConsentModal from './VoiceConsentModal';
 import type { VoiceState, VoiceResponse } from '../types/calculator';
 
 // Teclado de frações
@@ -61,7 +63,31 @@ export default function Calculator({
 }: CalculatorProps) {
   const isOnline = useOnlineStatus();
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [voiceConsentChecked, setVoiceConsentChecked] = useState(false);
+  const [hasVoiceConsent, setHasVoiceConsent] = useState<boolean | null>(null);
   const { history, addToHistory } = useCalculatorHistory();
+
+  // Verifica consentimento de voz quando o componente monta (ou userId muda)
+  useEffect(() => {
+    if (!userId || voiceConsentChecked) return;
+
+    const checkVoiceConsent = async () => {
+      try {
+        const granted = await hasConsent(userId, 'voice_training');
+        setHasVoiceConsent(granted);
+        setVoiceConsentChecked(true);
+        console.log('[Calculator] Voice consent checked:', granted);
+      } catch (err) {
+        console.warn('[Calculator] Error checking voice consent:', err);
+        // Em caso de erro, marca como verificado mas sem consentimento
+        setHasVoiceConsent(false);
+        setVoiceConsentChecked(true);
+      }
+    };
+
+    checkVoiceConsent();
+  }, [userId, voiceConsentChecked]);
   const {
     expression,
     setExpression,
@@ -148,6 +174,19 @@ export default function Calculator({
     },
   });
 
+  // Handler para resposta do modal de consentimento
+  const handleConsentResponse = (granted: boolean) => {
+    setHasVoiceConsent(granted);
+    setShowConsentModal(false);
+
+    // Se concedeu consentimento, inicia gravação automaticamente
+    if (granted && voiceState === 'idle') {
+      logger.voice.start();
+      setVoiceState('recording');
+      startRecording();
+    }
+  };
+
   // Voice button handlers - simplificado para máxima confiabilidade
   // Aperta = começa a gravar, Solta = para e processa
   const handleVoiceStart = (e: React.MouseEvent | React.TouchEvent) => {
@@ -160,6 +199,14 @@ export default function Calculator({
     // Se não tem acesso, mostra popup de upgrade
     if (!hasVoiceAccess) {
       onVoiceUpgradeClick();
+      return;
+    }
+
+    // Se ainda não verificou consentimento ou não tem consentimento, mostra modal
+    // hasVoiceConsent === null significa que ainda não foi verificado/perguntado
+    if (hasVoiceConsent === null && userId) {
+      logger.consent.prompted('voice_training');
+      setShowConsentModal(true);
       return;
     }
 
@@ -400,6 +447,15 @@ export default function Calculator({
         isOpen={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
       />
+
+      {/* Modal de Consentimento de Voz */}
+      {showConsentModal && userId && (
+        <VoiceConsentModal
+          userId={userId}
+          onConsent={handleConsentResponse}
+          onClose={() => setShowConsentModal(false)}
+        />
+      )}
     </div>
   );
 }
