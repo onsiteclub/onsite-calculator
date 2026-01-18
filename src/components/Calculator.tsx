@@ -117,6 +117,10 @@ export default function Calculator({
 
     const formData = new FormData();
     formData.append('file', audioBlob, 'recording.webm');
+    // Envia userId para API salvar voice_log (se usuário tiver consentimento)
+    if (userId) {
+      formData.append('user_id', userId);
+    }
 
     try {
       const response = await fetch(API_ENDPOINT, {
