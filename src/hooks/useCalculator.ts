@@ -4,6 +4,7 @@
 import { useState, useCallback } from 'react';
 import { calculate, type CalculationResult } from '../lib/calculator';
 import { saveCalculation, type InputMethod } from '../lib/calculations';
+import { logger } from '../lib/logger';
 
 interface SaveOptions {
   userId?: string;
@@ -50,12 +51,22 @@ export function useCalculator(): UseCalculatorReturn {
       setLastResult(result);
       setJustCalculated(true);
 
+      // Log do cálculo
+      logger.calculator.compute(true, {
+        expression,
+        result: result.resultFeetInches,
+        inputMethod: saveOptions?.inputMethod || 'keyboard',
+      });
+
       // Salvar cálculo no banco (async, não bloqueia)
       if (saveOptions?.userId) {
         saveCalculation(result, saveOptions).then(id => {
           if (id) setLastCalculationId(id);
         });
       }
+    } else if (expression) {
+      // Log de falha no cálculo
+      logger.calculator.compute(false, { expression });
     }
     return result;
   }, [expression]);
@@ -133,12 +144,22 @@ export function useCalculator(): UseCalculatorReturn {
       setLastResult(result);
       setJustCalculated(true);
 
+      // Log do cálculo via voz
+      logger.calculator.compute(true, {
+        expression: value,
+        result: result.resultFeetInches,
+        inputMethod: saveOptions?.inputMethod || 'voice',
+      });
+
       // Salvar cálculo no banco (async, não bloqueia)
       if (saveOptions?.userId) {
         saveCalculation(result, saveOptions).then(id => {
           if (id) setLastCalculationId(id);
         });
       }
+    } else if (value) {
+      // Log de falha no cálculo via voz
+      logger.calculator.compute(false, { expression: value, inputMethod: 'voice' });
     }
     return result;
   }, []);

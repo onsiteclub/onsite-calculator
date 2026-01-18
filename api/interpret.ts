@@ -11,6 +11,7 @@ import {
   detectLanguage,
   type VoiceLogRecord,
 } from './lib/voice-logs';
+import { apiLogger } from './lib/api-logger';
 
 // Helper para extrair IP do request
 function getClientIP(headers: Record<string, string | string[] | undefined>): string {
@@ -134,6 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Rate limiting
   if (!checkRateLimit(ip)) {
     console.error('[API] Rate limited:', ip);
+    apiLogger.voice.rateLimited(ip);
     return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
   }
 
@@ -214,6 +216,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!whisperResponse.ok) {
       const errText = await whisperResponse.text();
       console.error('[Voice] Whisper error:', errText);
+      apiLogger.voice.error('Whisper transcription failed', Date.now() - startTime, { error: errText }, userId, ip);
       return res.status(500).json({ error: 'Transcription failed' });
     }
 
@@ -242,6 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!gptResponse.ok) {
       const errText = await gptResponse.text();
       console.error('[Voice] GPT error:', errText, 'transcription:', transcribedText);
+      apiLogger.voice.error('GPT interpretation failed', Date.now() - startTime, { error: errText, transcription: transcribedText }, userId, ip);
       return res.status(500).json({ error: 'Interpretation failed' });
     }
 
@@ -251,6 +255,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const durationMs = Date.now() - startTime;
     console.log('[Voice] Success:', { transcription: transcribedText, expression: parsed.expression, duration_ms: durationMs });
+
+    // Log de sucesso para app_logs
+    apiLogger.voice.success(durationMs, { transcription: transcribedText, expression: parsed.expression }, userId, ip);
 
     // 3. Salvar voice_log se usuário tiver consentimento
     let voiceLogId: string | null = null;
@@ -286,6 +293,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (err) {
     console.error('[API] Exception:', String(err));
+    apiLogger.voice.error('Server exception', Date.now() - startTime, { error: String(err) }, undefined, ip);
     return res.status(500).json({ error: 'Server processing error' });
   }
 }

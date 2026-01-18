@@ -8,7 +8,7 @@ import { supabase } from './supabase';
 
 // Tipos
 type LogLevel = 'info' | 'warn' | 'error';
-type LogModule = 'Voice' | 'Auth' | 'Subscription' | 'Calculator' | 'API' | 'Sync';
+type LogModule = 'Voice' | 'Auth' | 'Subscription' | 'Calculator' | 'API' | 'Sync' | 'DeepLink' | 'Checkout' | 'History';
 
 interface LogEntry {
   level: LogLevel;
@@ -88,6 +88,7 @@ async function flushLogs(): Promise<void> {
       device_info: deviceInfo,
       duration_ms: log.duration_ms || null,
       success: log.success ?? null,
+      app_name: 'calculator',
     }));
 
     const { error } = await supabase.from('app_logs').insert(entries);
@@ -116,7 +117,8 @@ function scheduleFlush(): void {
 export function log(entry: LogEntry): void {
   const prefix = `[${entry.module}]`;
   const msg = entry.message || entry.action;
-  const ctx = entry.context || '';
+  // Serializa contexto para string legível no console
+  const ctx = entry.context ? JSON.stringify(entry.context) : '';
 
   // Console log (sempre - para debug local)
   switch (entry.level) {
@@ -181,6 +183,14 @@ export const logger = {
   },
 
   calculator: {
+    compute: (success: boolean, context?: Record<string, unknown>) =>
+      log({
+        level: success ? 'info' : 'warn',
+        module: 'Calculator',
+        action: 'compute',
+        success,
+        context,
+      }),
     error: (message: string, expression?: string) =>
       log({
         level: 'error',
@@ -202,6 +212,40 @@ export const logger = {
         message: String(error),
         context: { error },
       }),
+  },
+
+  deepLink: {
+    received: (url: string) =>
+      log({ level: 'info', module: 'DeepLink', action: 'url_received', context: { url } }),
+    authCallback: (success: boolean, context?: Record<string, unknown>) =>
+      log({ level: success ? 'info' : 'error', module: 'DeepLink', action: 'auth_callback', success, context }),
+    checkoutCallback: (success: boolean, context?: Record<string, unknown>) =>
+      log({ level: success ? 'info' : 'error', module: 'DeepLink', action: 'checkout_callback', success, context }),
+    error: (message: string, context?: Record<string, unknown>) =>
+      log({ level: 'error', module: 'DeepLink', action: 'error', message, context }),
+  },
+
+  checkout: {
+    start: () => log({ level: 'info', module: 'Checkout', action: 'flow_start' }),
+    tokenRequest: (success: boolean, context?: Record<string, unknown>) =>
+      log({ level: success ? 'info' : 'error', module: 'Checkout', action: 'token_request', success, context }),
+    redirect: (url: string) =>
+      log({ level: 'info', module: 'Checkout', action: 'redirect', context: { url } }),
+    complete: (success: boolean, context?: Record<string, unknown>) =>
+      log({ level: success ? 'info' : 'error', module: 'Checkout', action: 'complete', success, context }),
+    error: (message: string, context?: Record<string, unknown>) =>
+      log({ level: 'error', module: 'Checkout', action: 'error', message, context }),
+  },
+
+  history: {
+    load: (success: boolean, count?: number) =>
+      log({ level: success ? 'info' : 'warn', module: 'History', action: 'load', success, context: { count } }),
+    save: (success: boolean, context?: Record<string, unknown>) =>
+      log({ level: success ? 'info' : 'warn', module: 'History', action: 'save', success, context }),
+    clear: (success: boolean) =>
+      log({ level: success ? 'info' : 'warn', module: 'History', action: 'clear', success }),
+    error: (message: string, context?: Record<string, unknown>) =>
+      log({ level: 'error', module: 'History', action: 'error', message, context }),
   },
 };
 

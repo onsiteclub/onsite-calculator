@@ -80,7 +80,7 @@ async function setCache(data: CachedSubscription): Promise<void> {
 
 /**
  * Verifica se o usuário tem assinatura ativa no Supabase
- * Consulta diretamente a tabela 'subscriptions'
+ * Consulta diretamente a tabela 'billing_subscriptions'
  */
 export async function hasActiveSubscription(): Promise<boolean> {
   if (!supabase) {
@@ -97,7 +97,7 @@ export async function hasActiveSubscription(): Promise<boolean> {
     // Busca subscription específica do calculator
     // Tenta tanto 'calculator' quanto 'calculator-pro' para compatibilidade
     const { data, error } = await supabase
-      .from('subscriptions')
+      .from('billing_subscriptions')
       .select('*')
       .eq('user_id', user.id)
       .in('app', ['calculator', 'calculator-pro', 'onsite-calculator'])
@@ -133,7 +133,7 @@ export async function hasActiveSubscription(): Promise<boolean> {
 
 /**
  * Verifica acesso premium com cache local
- * Usa apenas Supabase como fonte de verdade (tabela subscriptions)
+ * Usa apenas Supabase como fonte de verdade (tabela billing_subscriptions)
  */
 export async function checkPremiumAccess(): Promise<boolean> {
   if (!supabase) {
