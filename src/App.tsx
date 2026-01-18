@@ -8,11 +8,12 @@ import Calculator from './components/Calculator';
 import AuthScreen from './components/AuthScreen';
 import { useAuth, useDeepLink } from './hooks';
 import { supabase } from './lib/supabase';
+import { logger } from './lib/logger';
 import type { VoiceState } from './types/calculator';
 import './styles/App.css';
 
 // URL do checkout
-const CHECKOUT_URL = 'https://auth.onsiteclub.ca/checkout/calculator';
+const CHECKOUT_URL = 'https://onsite-auth.vercel.app/checkout/calculator';
 const API_BASE_URL = Capacitor.isNativePlatform()
   ? 'https://calculator.onsiteclub.ca'
   : '';
@@ -39,7 +40,7 @@ export default function App() {
       // 1. Pega o access token da sessão atual
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
-        console.error('[App] No session token');
+        logger.checkout.error('No session token');
         return;
       }
 
@@ -54,7 +55,7 @@ export default function App() {
       });
 
       if (!tokenResponse.ok) {
-        console.error('[App] Failed to get checkout token');
+        logger.checkout.tokenRequest(false, { status: tokenResponse.status });
         // Fallback: abre checkout sem token
         const fallbackUrl = `${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}`;
         if (Capacitor.isNativePlatform()) {
@@ -83,7 +84,7 @@ export default function App() {
         window.open(url.toString(), '_blank');
       }
     } catch (err) {
-      console.error('[App] Error opening checkout:', err);
+      logger.checkout.error('Error opening checkout', { error: String(err) });
     }
   }, [user]);
 
@@ -95,7 +96,7 @@ export default function App() {
     },
     onCheckoutReturn: async () => {
       // Callback de retorno do checkout (pagamento concluído)
-      console.log('[App] Checkout return - refreshing subscription');
+      logger.checkout.complete(true, { action: 'refreshing_subscription' });
       // Aguarda um pouco para o banco processar
       setTimeout(async () => {
         await refreshProfile();
