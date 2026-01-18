@@ -63,7 +63,11 @@ export default function AuthScreen({ onSignIn, onSignUp, loading }: AuthScreenPr
       let result = await onSignIn(email, password);
 
       // Se usuário não existe, faz signup automático
-      if (result.error && result.error.includes('Invalid login credentials')) {
+      // Verifica tanto a mensagem original quanto a traduzida
+      if (result.error && (
+        result.error.includes('Invalid login credentials') ||
+        result.error.includes('Invalid email or password')
+      )) {
         result = await onSignUp(email, password);
       }
 
