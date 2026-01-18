@@ -40,6 +40,8 @@ function isAllowedOrigin(origin: string): boolean {
   if (!origin) return false;
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   if (origin.startsWith('capacitor://') || origin.startsWith('ionic://')) return true;
+  // Allow all Vercel preview deployments
+  if (origin.includes('.vercel.app')) return true;
   return false;
 }
 
