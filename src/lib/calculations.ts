@@ -6,10 +6,10 @@ import { supabase, isSupabaseEnabled } from './supabase';
 import type { CalculationResult } from '../types/calculator';
 
 // Tipos do schema calculations
-export type CalcType = 'length' | 'area' | 'volume' | 'material' | 'conversion' | 'custom';
+type CalcType = 'length' | 'area' | 'volume' | 'material' | 'conversion' | 'custom';
 export type InputMethod = 'keypad' | 'voice' | 'camera';
 
-export interface CalculationRecord {
+interface CalculationRecord {
   id?: string;
   user_id?: string;
   calc_type: CalcType;
@@ -131,90 +131,3 @@ export async function saveCalculation(
   }
 }
 
-/**
- * Salva um cálculo que falhou (para analytics de erros)
- */
-export async function saveFailedCalculation(
-  expression: string,
-  options: {
-    userId?: string;
-    inputMethod?: InputMethod;
-    errorMessage?: string;
-    appVersion?: string;
-  } = {}
-): Promise<string | null> {
-  if (!isSupabaseEnabled() || !supabase) {
-    return null;
-  }
-
-  if (!options.userId) {
-    return null;
-  }
-
-  try {
-    const record: CalculationRecord = {
-      user_id: options.userId,
-      calc_type: 'custom',
-      input_expression: expression,
-      input_method: options.inputMethod || 'keypad',
-      was_successful: false,
-      app_version: options.appVersion,
-    };
-
-    const { data, error } = await supabase
-      .from('calculations')
-      .insert(record)
-      .select('id')
-      .single();
-
-    if (error) {
-      console.warn('[Calculations] Error saving failed calc:', error.message);
-      return null;
-    }
-
-    return data?.id || null;
-  } catch (err) {
-    console.error('[Calculations] Exception saving failed calc:', err);
-    return null;
-  }
-}
-
-/**
- * Marca um cálculo como salvo nos favoritos
- */
-export async function markCalculationSaved(calculationId: string): Promise<boolean> {
-  if (!isSupabaseEnabled() || !supabase) {
-    return false;
-  }
-
-  try {
-    const { error } = await supabase
-      .from('calculations')
-      .update({ was_saved: true })
-      .eq('id', calculationId);
-
-    return !error;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Marca um cálculo como compartilhado
- */
-export async function markCalculationShared(calculationId: string): Promise<boolean> {
-  if (!isSupabaseEnabled() || !supabase) {
-    return false;
-  }
-
-  try {
-    const { error } = await supabase
-      .from('calculations')
-      .update({ was_shared: true })
-      .eq('id', calculationId);
-
-    return !error;
-  } catch {
-    return false;
-  }
-}

@@ -4,22 +4,12 @@
 
 import { supabase, isSupabaseEnabled } from './supabase';
 
-export type ConsentType =
+type ConsentType =
   | 'voice_training'
   | 'data_analytics'
   | 'marketing'
   | 'terms_of_service'
   | 'privacy_policy';
-
-interface ConsentRecord {
-  id: string;
-  user_id: string;
-  consent_type: ConsentType;
-  granted: boolean;
-  granted_at: string | null;
-  revoked_at: string | null;
-  document_version: string | null;
-}
 
 /**
  * Verifica se o usuário tem consentimento ativo para um tipo específico
@@ -152,30 +142,3 @@ export async function setConsent(
   }
 }
 
-/**
- * Obtém todos os consentimentos de um usuário
- */
-export async function getUserConsents(
-  userId: string
-): Promise<ConsentRecord[] | null> {
-  if (!isSupabaseEnabled() || !supabase) {
-    return null;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('consents')
-      .select('*')
-      .eq('user_id', userId);
-
-    if (error) {
-      console.error('[Consent] Error fetching consents:', error.message);
-      return null;
-    }
-
-    return data as ConsentRecord[];
-  } catch (err) {
-    console.error('[Consent] Exception fetching consents:', err);
-    return null;
-  }
-}

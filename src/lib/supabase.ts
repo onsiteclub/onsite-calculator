@@ -25,20 +25,6 @@ export const supabase = supabaseInstance;
 /** Verifica se Supabase está disponível */
 export const isSupabaseEnabled = (): boolean => !!supabase;
 
-/** Pega usuário atual */
-export const getCurrentUser = async () => {
-  if (!supabase) return null;
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
-};
-
-/** Pega sessão atual */
-export const getSession = async () => {
-  if (!supabase) return null;
-  const { data: { session } } = await supabase.auth.getSession();
-  return session;
-};
-
 /** Tipos do profile */
 export interface UserProfile {
   id: string;
