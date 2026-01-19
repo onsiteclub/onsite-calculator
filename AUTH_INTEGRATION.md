@@ -1,319 +1,460 @@
 # Sistema de Autenticação - OnSite Calculator
 
-## 📋 Visão Geral
+> **Versão**: 4.9 | **Última atualização**: 2026-01-19
+
+## Visão Geral
 
 Sistema de autenticação completo integrado ao OnSite Calculator com:
-- Login/Signup local dentro do app
-- Verificação de assinatura para Voice Feature
+- Login/Signup local dentro do app (email + senha)
+- Verificação de assinatura para Voice Feature via `billing_subscriptions`
 - Deep linking para retorno do checkout Stripe
-- Integração com Supabase
+- Sistema de código curto para evitar truncamento de URLs no APK
+- Retry com backoff para verificação de assinatura após checkout
+- Integração com Supabase + Auth Hub (Hermes)
 
 ---
 
-## 🎯 Fluxo de Autenticação
+## Fluxo de Autenticação (v4.9)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  1. Usuário abre o app                                  │
-│     ↓                                                    │
-│  2. Verifica se está autenticado (Supabase)             │
-│     ├─ NÃO → Mostra AuthScreen (Login/Signup)          │
-│     └─ SIM → Carrega perfil e mostra Calculator        │
-│                                                          │
-│  3. No Calculator, clica no botão de Voice              │
-│     ├─ TEM ACESSO → Inicia gravação                    │
-│     └─ SEM ACESSO → Abre VoiceUpgradePopup             │
-│                                                          │
-│  4. No Popup, clica "Start Free Trial"                  │
-│     ↓                                                    │
-│  5. Abre navegador externo:                             │
-│     https://auth.onsiteclub.ca/checkout/premium         │
-│     ?prefilled_email=...&redirect=onsitecalculator://...│
-│                                                          │
-│  6. Usuário completa checkout no Stripe                 │
-│     ↓                                                    │
-│  7. Página web redireciona para:                        │
-│     onsitecalculator://auth-callback                    │
-│     ?access_token=...&refresh_token=...                 │
-│                                                          │
-│  8. App recebe deep link, atualiza sessão               │
-│     ↓                                                    │
-│  9. Atualiza perfil do Supabase                         │
-│     ↓                                                    │
-│  10. Libera Voice Feature ✅                            │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        FLUXO DE AUTENTICAÇÃO                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Usuário abre o app                                                      │
+│     ↓                                                                       │
+│  2. Verifica sessão Supabase (useAuth)                                      │
+│     ├─ NÃO AUTENTICADO → AuthScreen (Login/Signup)                         │
+│     └─ AUTENTICADO → Carrega perfil + verifica assinatura                  │
+│                       ↓                                                     │
+│  3. checkPremiumAccess() verifica billing_subscriptions                     │
+│     └─ Busca: user_id + app_name='calculator' + status='active'            │
+│                                                                             │
+│  4. Renderiza Calculator com hasVoiceAccess                                 │
+│     ├─ TEM ACESSO → Botão mic funciona normalmente                         │
+│     └─ SEM ACESSO → Botão mic abre checkout direto                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📁 Arquivos Criados/Modificados
+## Fluxo de Checkout (v4.9 - Código Curto + Redundância)
 
-### Novos Arquivos:
-
-1. **`src/hooks/useAuth.ts`**
-   - Hook de autenticação principal
-   - Gerencia estado de login/logout
-   - Verifica assinatura e libera Voice Feature
-   - Funções: `signIn`, `signUp`, `signOut`, `refreshProfile`
-
-2. **`src/hooks/useDeepLink.ts`**
-   - Gerencia deep links do Capacitor
-   - Escuta `appUrlOpen` events
-   - Processa tokens de autenticação do callback
-
-3. **`src/components/AuthScreen.tsx`**
-   - Tela de Login/Signup integrada
-   - Interface amigável com validação
-   - Suporte a profissões (trades)
-
-4. **`src/styles/AuthScreen.css`**
-   - Estilos da tela de autenticação
-   - Design responsivo e moderno
-
-5. **`AUTH_INTEGRATION.md`** (este arquivo)
-   - Documentação completa do sistema
-
-### Arquivos Modificados:
-
-1. **`src/App.tsx`**
-   - Integração completa de autenticação
-   - Renderização condicional (Auth → Calculator)
-   - Deep link handler
-
-2. **`src/components/VoiceUpgradePopup.tsx`**
-   - Atualizado para usar Capacitor Browser
-   - Redireciona para checkout correto
-   - Preço ajustado ($9.99/ano)
-
-3. **`src/hooks/index.ts`**
-   - Exporta novos hooks
-
-4. **`src/styles/App.css`**
-   - Adicionados estilos de loading
-
-5. **`android/app/src/main/AndroidManifest.xml`**
-   - Configurado deep link `onsitecalculator://auth-callback`
-
-6. **`package.json`**
-   - Adicionados: `@capacitor/browser`, `@capacitor/app`
-
----
-
-## 🔐 Variáveis de Ambiente
-
-Certifique-se de que o `.env.local` contém:
-
-```bash
-# Supabase (obrigatório)
-VITE_SUPABASE_URL=https://xmpckuiluwhcdzyadggh.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-
-# Stripe Checkout (obrigatório para Voice)
-VITE_STRIPE_CHECKOUT_URL=https://buy.stripe.com/test_...
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        FLUXO DE CHECKOUT                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. CLIQUE NO UPGRADE (botão mic sem assinatura)                            │
+│     └── handleUpgradeClick() em App.tsx                                     │
+│         └── PRIMEIRO: refreshProfile() verifica se já tem acesso            │
+│             └── Se hasAccess=true → NÃO abre checkout (já pagou!)           │
+│             └── Se hasAccess=false → continua fluxo                         │
+│                                                                             │
+│  2. GERAR CÓDIGO CURTO                                                      │
+│     └── POST /api/checkout-code (Bearer token)                              │
+│         └── Valida token Supabase                                           │
+│         └── Gera código 8 chars (sem 0/O, 1/l/I)                            │
+│         └── Salva em checkout_codes:                                        │
+│             - code, user_id, email, app                                     │
+│             - redirect_url: 'onsitecalculator://auth-callback'              │
+│             - expires_at: NOW + 60s                                         │
+│             - used: false                                                   │
+│         └── Retorna { code: "abc123XY" }                                    │
+│                                                                             │
+│  3. ABRIR CHECKOUT                                                          │
+│     └── window.open('https://onsite-auth.vercel.app/r/{code}', '_system')   │
+│         └── _system = abre no browser nativo (Chrome/Samsung)               │
+│                                                                             │
+│  4. AUTH HUB (Hermes) - Rota /r/:code                                       │
+│     └── Busca código em checkout_codes                                      │
+│     └── Valida: existe, não expirado, não usado                             │
+│     └── Marca used=true                                                     │
+│     └── 302 redirect → /checkout/calculator                                 │
+│         ?prefilled_email={email}                                            │
+│         &user_id={user_id}                                                  │
+│         &returnRedirect={redirect_url}                                      │
+│                                                                             │
+│  5. STRIPE CHECKOUT                                                         │
+│     └── Usuário completa pagamento                                          │
+│     └── Webhook grava em billing_subscriptions                              │
+│                                                                             │
+│  6. PÁGINA DE SUCESSO                                                       │
+│     └── Auth Hub redireciona para: onsitecalculator://auth-callback         │
+│                                                                             │
+│  7. APP RECEBE DEEP LINK                                                    │
+│     └── useDeepLink detecta 'auth-callback'                                 │
+│     └── Chama onCheckoutReturn()                                            │
+│                                                                             │
+│  8. RETRY LOOP COM BACKOFF                                                  │
+│     └── Espera 1s → refreshProfile() → hasAccess?                           │
+│     └── Espera 2s → refreshProfile() → hasAccess?                           │
+│     └── Espera 4s → refreshProfile() → hasAccess?                           │
+│     └── Se ainda false: alert("feche e abra o app")                         │
+│                                                                             │
+│  9. VOICE DESBLOQUEADO                                                      │
+│     └── hasVoiceAccess=true → botão mic funciona                            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📊 Estrutura do Banco de Dados (Supabase)
+## Arquivos Principais
 
-### Tabela: `profiles`
+### Hooks de Autenticação
+
+| Arquivo | Responsabilidade |
+|---------|------------------|
+| `src/hooks/useAuth.ts` | Estado de auth, signIn, signUp, signOut, refreshProfile |
+| `src/hooks/useDeepLink.ts` | Escuta deep links, callbacks de auth e checkout |
+| `src/lib/subscription.ts` | Verifica `billing_subscriptions`, cache de assinatura |
+
+### API Serverless
+
+| Arquivo | Responsabilidade |
+|---------|------------------|
+| `api/checkout-code.ts` | Gera código curto para checkout (8 chars, 60s TTL) |
+| `api/interpret.ts` | Processa comandos de voz (requer assinatura) |
+
+### Componentes
+
+| Arquivo | Responsabilidade |
+|---------|------------------|
+| `src/App.tsx` | Orquestra auth + checkout + deep links |
+| `src/components/AuthScreen.tsx` | Tela de login/signup |
+| `src/components/Calculator.tsx` | Calculadora com botão de voz |
+
+---
+
+## Código Curto (checkout_codes)
+
+**Problema resolvido**: Capacitor Browser plugin trunca query params longos no APK (bug #7319).
+
+### Estrutura da Tabela
 
 ```sql
-CREATE TABLE profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id),
+CREATE TABLE checkout_codes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code TEXT UNIQUE NOT NULL,           -- 8 chars sem ambíguos
+  user_id UUID REFERENCES auth.users(id),
   email TEXT NOT NULL,
-  first_name TEXT,
-  last_name TEXT,
-  nome TEXT, -- Nome completo
-  trade TEXT, -- Profissão
-  birthday DATE,
-  gender TEXT,
-  subscription_status TEXT DEFAULT 'trialing',
-  trial_ends_at TIMESTAMP DEFAULT (NOW() + INTERVAL '6 months'),
+  app TEXT NOT NULL DEFAULT 'calculator',
+  redirect_url TEXT,                    -- Deep link de retorno (v4.9)
+  expires_at TIMESTAMP NOT NULL,        -- NOW + 60 segundos
+  used BOOLEAN DEFAULT false,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Geração do Código
+
+```typescript
+// api/checkout-code.ts
+function generateCode(length = 8): string {
+  // Sem caracteres ambíguos: 0/O, 1/l/I
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let code = '';
+  const array = new Uint8Array(length);
+  crypto.getRandomValues(array);
+  for (let i = 0; i < length; i++) {
+    code += chars[array[i] % chars.length];
+  }
+  return code;
+}
+```
+
+### Insert com redirect_url (v4.9)
+
+```typescript
+await supabase.from('checkout_codes').insert({
+  code,
+  user_id: user.id,
+  email: user.email,
+  app,
+  redirect_url: 'onsitecalculator://auth-callback',  // NOVO v4.9
+  expires_at: expiresAt,
+  used: false,
+});
+```
+
+---
+
+## Verificação de Assinatura
+
+### Tabela: billing_subscriptions
+
+```sql
+CREATE TABLE billing_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id),
+  app_name TEXT NOT NULL,              -- 'calculator'
+  status TEXT NOT NULL,                -- 'active', 'canceled', 'past_due', etc.
+  stripe_customer_id TEXT,
+  stripe_subscription_id TEXT,
+  current_period_end TIMESTAMP,
+  cancel_at_period_end BOOLEAN DEFAULT false,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );
-
--- Constraint para subscription_status
-ALTER TABLE profiles
-ADD CONSTRAINT subscription_status_check
-CHECK (subscription_status IN ('trialing', 'active', 'canceled', 'past_due'));
 ```
 
-### Trigger Automático (Criar Perfil)
+### Query de Verificação
 
-```sql
--- Cria perfil automaticamente após signup
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO public.profiles (
-    id,
-    email,
-    first_name,
-    last_name,
-    nome,
-    trade,
-    subscription_status,
-    trial_ends_at
-  )
-  VALUES (
-    NEW.id,
-    NEW.email,
-    NEW.raw_user_meta_data->>'first_name',
-    NEW.raw_user_meta_data->>'last_name',
-    CONCAT(
-      NEW.raw_user_meta_data->>'first_name',
-      ' ',
-      NEW.raw_user_meta_data->>'last_name'
-    ),
-    NEW.raw_user_meta_data->>'trade',
-    'trialing',
-    NOW() + INTERVAL '6 months'
-  );
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+```typescript
+// src/lib/subscription.ts
+const { data } = await supabase
+  .from('billing_subscriptions')
+  .select('*')
+  .eq('user_id', user.id)
+  .eq('app_name', 'calculator')
+  .eq('status', 'active')
+  .maybeSingle();
 
--- Trigger
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW
-  EXECUTE FUNCTION public.handle_new_user();
+const hasAccess = !!data;
+```
+
+### Cache de Assinatura
+
+- Armazenado em `@capacitor/preferences` + memória
+- TTL: 5 minutos
+- Limpo em: logout, refreshSubscriptionStatus()
+
+---
+
+## refreshProfile() (v4.9)
+
+Agora retorna `Promise<boolean>` indicando se tem acesso voice:
+
+```typescript
+// src/hooks/useAuth.ts
+const refreshProfile = useCallback(async (): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return false;
+
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .single();
+
+    // Força refresh do cache de assinatura
+    const hasVoiceAccess = await refreshSubscriptionStatus();
+
+    setAuthState(prev => ({
+      ...prev,
+      profile: profileData,
+      hasVoiceAccess,
+    }));
+
+    return hasVoiceAccess;
+  } catch (error) {
+    logger.auth.error('Error refreshing profile', { error: String(error) });
+    return false;
+  }
+}, []);
 ```
 
 ---
 
-## 🔗 Integração com Checkout (auth.onsiteclub.ca)
+## Retry Loop (v4.9)
 
-### O que o projeto de checkout precisa fazer:
+Após retornar do checkout, o app tenta verificar a assinatura múltiplas vezes:
 
-1. **Receber parâmetros na URL:**
-   ```
-   https://auth.onsiteclub.ca/checkout/premium
-     ?prefilled_email=user@example.com
-     &redirect=onsitecalculator://auth-callback
-   ```
+```typescript
+// src/App.tsx - onCheckoutReturn
+const delays = [1000, 2000, 4000]; // 1s, 2s, 4s (total ~7s)
 
-2. **Após pagamento bem-sucedido:**
-   - Atualizar `profiles.subscription_status` → `'active'` ou `'trialing'`
-   - Redirecionar para:
-     ```
-     onsitecalculator://auth-callback
-       ?access_token={token}
-       &refresh_token={token}
-       &subscription_status=active
-     ```
+for (let i = 0; i < delays.length; i++) {
+  await new Promise(resolve => setTimeout(resolve, delays[i]));
 
-3. **Exemplo de código no checkout:**
+  const hasAccess = await refreshProfile();
+  logger.checkout.verifyAttempt(i + 1, hasAccess);
+
+  if (hasAccess) {
+    logger.checkout.verified(true, { attempt: i + 1 });
+    return; // Sucesso!
+  }
+}
+
+// Fallback se webhook ainda não processou
+logger.checkout.verified(false, { attempts: delays.length });
+alert('Pagamento processado! Se o Voice não desbloqueou, feche e abra o app.');
+```
+
+---
+
+## Verificação Antes do Checkout (v4.9)
+
+Evita abrir checkout se usuário já pagou mas estado não atualizou:
+
+```typescript
+// src/App.tsx - handleUpgradeClick
+const handleUpgradeClick = useCallback(async () => {
+  if (!supabase || !user) return;
+
+  // NOVO v4.9: Verifica antes de redirecionar
+  const hasAccess = await refreshProfile();
+  if (hasAccess) {
+    logger.checkout.alreadySubscribed();
+    return; // Não precisa ir pro checkout!
+  }
+
+  // ... continua para gerar código e abrir checkout
+}, [user, refreshProfile]);
+```
+
+---
+
+## Deep Link
+
+### Scheme
+
+```
+onsitecalculator://auth-callback
+```
+
+### Configuração Android
+
+```xml
+<!-- android/app/src/main/AndroidManifest.xml -->
+<intent-filter>
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="onsitecalculator" android:host="auth-callback" />
+</intent-filter>
+```
+
+### Handler
+
+```typescript
+// src/hooks/useDeepLink.ts
+App.addListener('appUrlOpen', async ({ url }) => {
+  logger.deepLink.received(url);
+
+  if (url.includes('auth-callback')) {
+    // Checkout return ou OAuth callback
+    if (onCheckoutReturn) {
+      await onCheckoutReturn();
+    }
+  }
+});
+```
+
+---
+
+## Variáveis de Ambiente
+
+```bash
+# .env.local
+
+# Supabase
+VITE_SUPABASE_URL=https://xmpckuiluwhcdzyadggh.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# Vercel Serverless (api/)
+SUPABASE_URL=https://xmpckuiluwhcdzyadggh.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+---
+
+## Logs de Checkout (v4.9)
+
+```typescript
+// src/lib/logger.ts
+checkout: {
+  start: () => ...,
+  tokenRequest: (success, context) => ...,
+  redirect: (url) => ...,
+  complete: (success, context) => ...,
+  verifyAttempt: (attempt, hasAccess) => ...,  // NOVO v4.9
+  verified: (success, context) => ...,          // NOVO v4.9
+  alreadySubscribed: () => ...,                 // NOVO v4.9
+  error: (message, context) => ...,
+}
+```
+
+---
+
+## Troubleshooting
+
+### Voice não funciona após checkout
+
+1. Verifique logs do Supabase: `billing_subscriptions` tem registro?
+2. Verifique coluna: `app_name` deve ser `'calculator'` (não `'app'`)
+3. Verifique status: deve ser `'active'`
+4. Force refresh: fechar e abrir o app
+
+### Deep link não chega ao app
+
+1. Verificar se Auth Hub está redirecionando para `onsitecalculator://auth-callback`
+2. Verificar `redirect_url` no código curto foi salvo
+3. Teste manual: `adb shell am start -a android.intent.action.VIEW -d "onsitecalculator://auth-callback"`
+
+### Código curto não funciona
+
+1. Verificar se tabela `checkout_codes` tem coluna `redirect_url`
+2. Verificar se código não expirou (TTL 60s)
+3. Verificar se código não foi usado (`used=true`)
+
+---
+
+## Integração com Auth Hub (Hermes)
+
+### Requisitos para Hermes
+
+1. **Rota `/r/:code`**: Passar `returnRedirect` no redirect
    ```typescript
-   // Após sucesso do Stripe
-   const redirectUrl = searchParams.get('redirect');
-   const { access_token, refresh_token } = session;
+   const checkoutUrl = new URL('/checkout/calculator', baseUrl);
+   checkoutUrl.searchParams.set('prefilled_email', data.email);
+   checkoutUrl.searchParams.set('user_id', data.user_id);
+   if (data.redirect_url) {
+     checkoutUrl.searchParams.set('returnRedirect', data.redirect_url);
+   }
+   ```
 
-   if (redirectUrl?.startsWith('onsitecalculator://')) {
-     const callbackUrl = new URL(redirectUrl);
-     callbackUrl.searchParams.set('access_token', access_token);
-     callbackUrl.searchParams.set('refresh_token', refresh_token);
-     callbackUrl.searchParams.set('subscription_status', 'active');
-
-     window.location.href = callbackUrl.toString();
+2. **Página `/checkout/success`**: Redirecionar para deep link
+   ```typescript
+   const redirect = searchParams.get('redirect');
+   if (redirect?.startsWith('onsitecalculator://')) {
+     window.location.href = redirect;
    }
    ```
 
 ---
 
-## 🚀 Comandos para Build
+## Links Úteis
 
-### Desenvolvimento Web:
-```bash
-npm run dev
-```
-
-### Build para Produção:
-```bash
-npm run build
-```
-
-### Sincronizar com Android:
-```bash
-npm run cap:sync
-npm run cap:android
-```
-
-### Build APK:
-1. Abrir no Android Studio: `npm run cap:android`
-2. Build > Build Bundle(s) / APK(s) > Build APK(s)
-
----
-
-## 🧪 Como Testar
-
-### 1. Teste de Login/Signup Local:
-- Abra o app
-- Tente criar uma conta
-- Faça logout
-- Faça login novamente
-
-### 2. Teste de Voice sem Assinatura:
-- Faça login
-- Clique no botão de Voice
-- Deve abrir o popup de upgrade
-
-### 3. Teste de Deep Link (Web):
-- No browser, acesse:
-  ```
-  onsitecalculator://auth-callback?access_token=test&refresh_token=test
-  ```
-- O app deve abrir (se instalado)
-
-### 4. Teste de Checkout Completo:
-- Clique em "Start Free Trial" no popup
-- Complete o checkout no Stripe (teste)
-- Deve retornar ao app com Voice liberado
-
----
-
-## 🐛 Troubleshooting
-
-### Voice não funciona após checkout:
-1. Verifique se o `subscription_status` foi atualizado no Supabase
-2. Execute `refreshProfile()` manualmente
-3. Confira logs do console: `[App] Auth state`
-
-### Deep Link não funciona:
-1. Certifique-se de que o AndroidManifest.xml está atualizado
-2. Reinstale o app após modificar o manifest
-3. Teste com: `adb shell am start -a android.intent.action.VIEW -d "onsitecalculator://auth-callback?access_token=test"`
-
-### Erro ao fazer login:
-1. Verifique as credenciais do Supabase
-2. Confira se a tabela `profiles` existe
-3. Verifique se o trigger está ativo
-
----
-
-## 📝 Próximos Passos
-
-- [ ] Implementar refresh token automático
-- [ ] Adicionar verificação de email
-- [ ] Implementar reset de senha
-- [ ] Adicionar OAuth (Google, Apple)
-- [ ] Adicionar analytics de conversão
-- [ ] Implementar notificações push
-
----
-
-## 🔗 Links Úteis
-
-- **Checkout**: https://auth.onsiteclub.ca/checkout/premium
-- **Success**: https://auth.onsiteclub.ca/success
-- **Billing**: https://auth.onsiteclub.ca/billing
-- **Webhook Stripe**: https://auth.onsiteclub.ca/api/webhooks/stripe
-
+- **Auth Hub**: https://onsite-auth.vercel.app
+- **Checkout**: https://onsite-auth.vercel.app/checkout/calculator
 - **Supabase Dashboard**: https://app.supabase.com
 - **Stripe Dashboard**: https://dashboard.stripe.com
 
 ---
 
-**OnSite Club © 2025**
+## Changelog
+
+### v4.9 (2026-01-19)
+- Adicionado `redirect_url` no checkout_codes para retorno via deep link
+- `refreshProfile()` agora retorna `Promise<boolean>`
+- Verificação antes do checkout (evita redirect desnecessário)
+- Retry loop com backoff (1s, 2s, 4s) no retorno do checkout
+- Novos logs: `verifyAttempt`, `verified`, `alreadySubscribed`
+
+### v4.8 (2026-01-18)
+- Sistema de código curto para evitar truncamento de URL no APK
+- Tabela `checkout_codes` com TTL de 60 segundos
+
+### v4.0 (2026-01-15)
+- Migração de `profiles.subscription_status` para `billing_subscriptions`
+- Cache de assinatura com Capacitor Preferences
+
+---
+
+**OnSite Club © 2025-2026**
