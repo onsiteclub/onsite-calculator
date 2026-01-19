@@ -6,7 +6,6 @@ import { Capacitor } from '@capacitor/core';
 import { useCalculator, useOnlineStatus, useVoiceRecorder, useCalculatorHistory } from '../hooks';
 import { logger } from '../lib/logger';
 import { getConsentStatus } from '../lib/consent';
-import { getSession } from '../lib/supabase';
 import { HistoryModal } from './HistoryModal';
 import VoiceConsentModal from './VoiceConsentModal';
 import type { VoiceState, VoiceResponse } from '../types/calculator';
@@ -118,20 +117,14 @@ export default function Calculator({
 
     const formData = new FormData();
     formData.append('file', audioBlob, 'recording.webm');
-    // SEGURANÇA: Não envia mais user_id no FormData
-    // A API valida o token JWT e extrai user_id verificado
+    // Envia userId para API salvar voice_log (se usuário tiver consentimento)
+    if (userId) {
+      formData.append('user_id', userId);
+    }
 
     try {
-      // Obter token da sessão para autenticação segura
-      const session = await getSession();
-      const headers: HeadersInit = {};
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
-      }
-
       const response = await fetch(API_ENDPOINT, {
         method: 'POST',
-        headers,
         body: formData,
       });
 
