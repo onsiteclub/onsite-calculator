@@ -23,64 +23,62 @@ export default function VoiceUpgradePopup({ onClose, userEmail }: VoiceUpgradePo
 
   const checkoutUrl = 'https://auth.onsiteclub.ca/checkout/calculator';
 
+  // Helper para abrir URL no browser
+  const openCheckoutUrl = async (url: string) => {
+    if (Capacitor.isNativePlatform()) {
+      await Browser.open({ url, presentationStyle: 'popover' });
+    } else {
+      window.open(url, '_blank');
+    }
+    onClose();
+  };
+
   const handleStartTrial = async () => {
     setIsLoading(true);
     setError(null);
 
+    const redirectUri = 'onsitecalculator://auth-callback';
+
     try {
-      // 1. Pega o access token da sessão atual
-      if (!supabase) {
-        throw new Error('Autenticação não disponível');
+      // Tenta usar API para gerar token seguro (melhor experiência)
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          try {
+            const tokenResponse = await fetch(`${API_BASE_URL}/api/checkout-token`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ app: 'calculator' }),
+            });
+
+            if (tokenResponse.ok) {
+              const { token } = await tokenResponse.json();
+              const url = new URL(checkoutUrl);
+              url.searchParams.set('token', token);
+              if (userEmail) {
+                url.searchParams.set('prefilled_email', userEmail);
+              }
+              url.searchParams.set('redirect', redirectUri);
+              await openCheckoutUrl(url.toString());
+              return;
+            }
+          } catch (apiErr) {
+            console.warn('[VoiceUpgrade] API failed, using fallback:', apiErr);
+          }
+        }
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Sessão expirada. Faça login novamente.');
-      }
-
-      // 2. Chama a API para gerar o JWT token seguro
-      const tokenResponse = await fetch(`${API_BASE_URL}/api/checkout-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ app: 'calculator' }),
-      });
-
-      if (!tokenResponse.ok) {
-        const errorData = await tokenResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Erro ao preparar checkout');
-      }
-
-      const { token } = await tokenResponse.json();
-
-      // 3. Monta a URL com o token JWT
-      const redirectUri = 'onsitecalculator://auth-callback';
-      const url = new URL(checkoutUrl);
-
-      // Envia apenas o token JWT (contém user_id criptografado)
-      url.searchParams.set('token', token);
-
-      // Email é opcional, apenas para mostrar no UI do checkout
+      // Fallback: abre checkout diretamente com email (sem token)
+      // O checkout vai pedir login novamente, mas funciona
+      const fallbackUrl = new URL(checkoutUrl);
       if (userEmail) {
-        url.searchParams.set('prefilled_email', userEmail);
+        fallbackUrl.searchParams.set('prefilled_email', userEmail);
       }
-
-      url.searchParams.set('redirect', redirectUri);
-
-      // 4. Abre o browser externo
-      if (Capacitor.isNativePlatform()) {
-        await Browser.open({
-          url: url.toString(),
-          presentationStyle: 'popover',
-        });
-      } else {
-        window.open(url.toString(), '_blank');
-      }
-
-      // Fecha o popup após abrir o checkout
-      onClose();
+      fallbackUrl.searchParams.set('redirect', redirectUri);
+      await openCheckoutUrl(fallbackUrl.toString());
 
     } catch (err) {
       console.error('[VoiceUpgrade] Error:', err);
