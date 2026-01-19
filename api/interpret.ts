@@ -3,6 +3,7 @@
 // Vercel Serverless Function
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createClient } from '@supabase/supabase-js';
 import {
   canCollectVoice,
   saveVoiceLog,
@@ -12,6 +13,37 @@ import {
   type VoiceLogRecord,
 } from './lib/voice-logs.js';
 import { apiLogger } from './lib/api-logger.js';
+
+// Validar token JWT e extrair user_id verificado
+async function validateToken(authHeader: string | string[] | undefined): Promise<string | null> {
+  // Normalizar header (pode ser array)
+  const header = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  if (!header?.startsWith('Bearer ')) return null;
+
+  const token = header.slice(7);
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn('[API] Missing Supabase credentials for token validation');
+    return null;
+  }
+
+  try {
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
+    if (error) {
+      console.warn('[API] Token validation error:', error.message);
+      return null;
+    }
+
+    return user?.id || null;
+  } catch (err) {
+    console.error('[API] Token validation exception:', err);
+    return null;
+  }
+}
 
 // Helper para extrair IP do request
 function getClientIP(headers: Record<string, string | string[] | undefined>): string {
@@ -148,6 +180,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Server configuration error' });
   }
 
+  // SEGURANÇA: Validar token JWT e extrair user_id verificado
+  // Não confia mais em user_id enviado pelo cliente
+  const userId = await validateToken(req.headers.authorization);
+  if (userId) {
+    console.log('[API] Authenticated user:', userId);
+  }
+
   try {
     // Parse multipart form data
     const chunks: Buffer[] = [];
@@ -166,22 +205,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid content type' });
     }
 
-    // Simple multipart parser
+    // Simple multipart parser - apenas extrai audio, não confia em user_id do form
     const parts = body.toString('binary').split(`--${boundary}`);
     let audioData: Buffer | null = null;
     let filename = 'audio.webm';
-    let userId: string | undefined;
 
     for (const part of parts) {
-      // Extract user_id field if present
-      if (part.includes('name="user_id"')) {
-        const headerEnd = part.indexOf('\r\n\r\n');
-        if (headerEnd !== -1) {
-          const content = part.slice(headerEnd + 4).trim();
-          userId = content.replace(/\r\n--$/, '').replace(/--\r\n$/, '').trim();
-        }
-      }
-
       if (part.includes('filename=')) {
         const filenameMatch = part.match(/filename="([^"]+)"/);
         if (filenameMatch) filename = filenameMatch[1];
