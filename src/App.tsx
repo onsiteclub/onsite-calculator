@@ -2,13 +2,21 @@
 // App principal com sistema de autenticação completo
 
 import { useState, useCallback } from 'react';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import Calculator from './components/Calculator';
 import AuthScreen from './components/AuthScreen';
-import VoiceUpgradePopup from './components/VoiceUpgradePopup';
 import { useAuth, useDeepLink } from './hooks';
+import { supabase } from './lib/supabase';
 import { logger } from './lib/logger';
 import type { VoiceState } from './types/calculator';
 import './styles/App.css';
+
+// URL do checkout
+const CHECKOUT_URL = 'https://auth.onsiteclub.ca/checkout/calculator';
+const API_BASE_URL = Capacitor.isNativePlatform()
+  ? 'https://calculator.onsiteclub.ca'
+  : '';
 
 export default function App() {
   const {
@@ -23,12 +31,77 @@ export default function App() {
   } = useAuth();
 
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
-  const [showUpgradePopup, setShowUpgradePopup] = useState(false);
 
-  // Mostra popup de upgrade quando usuário sem assinatura clica no botão de voz
-  const handleUpgradeClick = useCallback(() => {
-    setShowUpgradePopup(true);
-  }, []);
+  // Redireciona direto para o checkout (sem popup)
+  const handleUpgradeClick = useCallback(async () => {
+    if (!supabase || !user) return;
+
+    try {
+      // 1. Pega o access token da sessão atual
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        logger.checkout.error('No session token');
+        // Fallback sem token
+        const fallbackUrl = `${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}&redirect=onsitecalculator://auth-callback`;
+        if (Capacitor.isNativePlatform()) {
+          await Browser.open({ url: fallbackUrl, presentationStyle: 'popover' });
+        } else {
+          window.open(fallbackUrl, '_blank');
+        }
+        return;
+      }
+
+      // 2. Gera JWT token seguro via API
+      const tokenResponse = await fetch(`${API_BASE_URL}/api/checkout-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ app: 'calculator' }),
+      });
+
+      if (!tokenResponse.ok) {
+        logger.checkout.tokenRequest(false, { status: tokenResponse.status });
+        // Fallback: abre checkout sem token
+        const fallbackUrl = `${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}&redirect=onsitecalculator://auth-callback`;
+        if (Capacitor.isNativePlatform()) {
+          await Browser.open({ url: fallbackUrl, presentationStyle: 'popover' });
+        } else {
+          window.open(fallbackUrl, '_blank');
+        }
+        return;
+      }
+
+      const { token } = await tokenResponse.json();
+
+      // 3. Monta URL com token JWT
+      const redirectUri = 'onsitecalculator://auth-callback';
+      const url = new URL(CHECKOUT_URL);
+      url.searchParams.set('token', token);
+      if (user.email) {
+        url.searchParams.set('prefilled_email', user.email);
+      }
+      url.searchParams.set('redirect', redirectUri);
+
+      // 4. Abre o checkout
+      logger.checkout.tokenRequest(true, {});
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url: url.toString(), presentationStyle: 'popover' });
+      } else {
+        window.open(url.toString(), '_blank');
+      }
+    } catch (err) {
+      logger.checkout.error('Checkout redirect failed', { error: String(err) });
+      // Fallback em caso de erro
+      const fallbackUrl = `${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}&redirect=onsitecalculator://auth-callback`;
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url: fallbackUrl, presentationStyle: 'popover' });
+      } else {
+        window.open(fallbackUrl, '_blank');
+      }
+    }
+  }, [user]);
 
   // Configura Deep Linking para receber callback do checkout
   useDeepLink({
@@ -69,23 +142,14 @@ export default function App() {
 
   // Usuário autenticado: mostra calculadora
   return (
-    <>
-      <Calculator
-        voiceState={voiceState}
-        setVoiceState={setVoiceState}
-        hasVoiceAccess={hasVoiceAccess}
-        onVoiceUpgradeClick={handleUpgradeClick}
-        onSignOut={signOut}
-        userName={profile?.nome || profile?.email || user?.email}
-        userId={user?.id}
-      />
-      {showUpgradePopup && (
-        <VoiceUpgradePopup
-          onClose={() => setShowUpgradePopup(false)}
-          userEmail={user?.email}
-          userId={user?.id}
-        />
-      )}
-    </>
+    <Calculator
+      voiceState={voiceState}
+      setVoiceState={setVoiceState}
+      hasVoiceAccess={hasVoiceAccess}
+      onVoiceUpgradeClick={handleUpgradeClick}
+      onSignOut={signOut}
+      userName={profile?.nome || profile?.email || user?.email}
+      userId={user?.id}
+    />
   );
 }

@@ -201,7 +201,7 @@ export default function Calculator({
     // Bloqueia se offline ou processando
     if (!isOnline || voiceState === 'processing') return;
 
-    // Se não tem acesso, mostra popup de upgrade
+    // Se não tem acesso, redireciona para checkout
     if (!hasVoiceAccess) {
       onVoiceUpgradeClick();
       return;
