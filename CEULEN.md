@@ -2,7 +2,7 @@
 
 > **ESTE CABEÇALHO É IMUTÁVEL. NÃO ALTERE AS SEÇÕES MARCADAS COM [LOCKED].**
 >
-> Última sincronização com Blue: 2025-01-18
+> Última sincronização com Blue: 2026-01-19
 
 ---
 
@@ -379,7 +379,7 @@ Ao iniciar sessão, ler este documento e verificar:
 | **HistoryModal** | `src/components/HistoryModal.tsx` | Modal de histórico de cálculos (botão M) |
 | **App Shell** | `App.tsx` | Decide fluxo: auth vs calculadora + lógica de checkout |
 
-> **Nota v4.2**: `VoiceUpgradePopup.tsx` ainda existe no código mas não é usado. O upgrade redireciona direto para checkout.
+> **Nota v4.7**: `VoiceUpgradePopup.tsx` foi removido. O upgrade redireciona direto para checkout via `handleUpgradeClick()` em `App.tsx`.
 
 ### 2.1 Header (Cabeçalho)
 **Responsabilidade**: Branding e status do usuário
@@ -924,11 +924,18 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - `calculator/engine.ts` - Motor de cálculo principal
 - `calculator/index.ts` - Exportador público
 - `calculations.ts` - Persistência de cálculos no Supabase (Blueprint)
+  - Exports: `saveCalculation()`, `InputMethod` (tipo)
+  - Internos: `CalcType`, `CalculationRecord` (não exportados)
 - `consent.ts` - Verificação de consentimento (voice_training)
+  - Exports: `hasConsent()`, `getConsentStatus()`, `canCollectVoice()`, `setConsent()`
+  - Internos: `ConsentType` (não exportado)
 - `logger.ts` - Logging estruturado (módulos: Voice, Auth, Subscription, Calculator, Sync, DeepLink, Checkout, History)
 - `server-logger.ts` - Logger para API endpoints
 - `supabase.ts` - Cliente Supabase
+  - Exports: `supabase`, `isSupabaseEnabled()`, `UserProfile` (tipo)
 - `subscription.ts` - Verificação de assinatura
+  - Exports: `hasActiveSubscription()`, `checkPremiumAccess()`, `clearSubscriptionCache()`, `refreshSubscriptionStatus()`
+  - Internos: `CachedSubscription`, `SubscriptionData` (não exportados)
 
 ### Arquivos em `src/hooks/`
 - `useCalculator.ts` - Hook principal da calculadora
@@ -944,7 +951,6 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - `AuthScreen.tsx` - Tela de login/signup
 - `HistoryModal.tsx` - Modal de histórico
 - `VoiceConsentModal.tsx` - Modal de consentimento para voice_training (v4.6)
-- `VoiceUpgradePopup.tsx` - (não usado, pode ser deletado)
 
 ### Arquivos em `api/`
 - `interpret.ts` - API de voz (Whisper + GPT-4o + saveVoiceLog)
@@ -993,6 +999,15 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - [ ] Padronizar parsing de voz em modulo unico (evitar regex solta na UI)
 
 ### Changelog
+
+**v4.7 (2026-01-19) - Code Cleanup**
+- Removido: `VoiceUpgradePopup.tsx` - deletado permanentemente
+- Removido: `saveFailedCalculation()`, `markCalculationSaved()`, `markCalculationShared()` de calculations.ts
+- Removido: `getUserConsents()` de consent.ts
+- Removido: `getCurrentUser()`, `getSession()` de supabase.ts
+- Internalizados: `CalcType`, `CalculationRecord`, `ConsentType` (não mais exportados)
+- Fix: Checkout URL corrigida para `https://onsite-auth.vercel.app/checkout/calculator`
+- Limpeza: 141 linhas de código morto removidas
 
 **v4.6 (2026-01-18) - Voice Consent UI**
 - Novo: VoiceConsentModal.tsx - Modal de consentimento para voice_training
@@ -1068,4 +1083,4 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 *Ceulen — Agente Calculator*
 *Subordinado a Blueprint (Blue)*
-*Última sync: 2026-01-18 (v4.6 - Voice Consent UI)*
+*Última sync: 2026-01-19 (v4.7 - Code Cleanup)*
