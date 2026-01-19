@@ -2,7 +2,7 @@
 
 > **ESTE CABEÇALHO É IMUTÁVEL. NÃO ALTERE AS SEÇÕES MARCADAS COM [LOCKED].**
 >
-> Última sincronização com Blue: 2026-01-19 (v4.8)
+> Última sincronização com Blue: 2026-01-19 (v4.9)
 
 ---
 
@@ -582,7 +582,10 @@ Regex: `/'|"|\d+\/\d+/`
   - `signIn()`: Login com email/senha
   - `signUp()`: Criar conta
   - `signOut()`: Logout
-  - `refreshProfile()`: Atualizar perfil após checkout
+  - `refreshProfile()`: Atualizar perfil após checkout (v4.9: retorna `Promise<boolean>`)
+- **Importante (v4.9)**:
+  - `refreshProfile()` agora retorna `boolean` indicando se tem acesso voice
+  - Usado pelo retry loop no retorno do checkout
 - **Importante (v4.0)**:
   - useEffect com `[]` (sem dependências) para evitar loops infinitos
   - Listener `onAuthStateChange` simplificado
@@ -787,56 +790,254 @@ interface SubscriptionData {
 - `Calculator.tsx` recebe `hasVoiceAccess` e `voiceState`
 - Se não tiver acesso → botão de mic redireciona DIRETO para checkout (sem popup)
 
-### 8.5 Checkout Externo (v4.8 - Código Curto no PATH)
+### 8.5 Checkout Externo (v4.9 - Código Curto + Redundância)
 
-**Problema resolvido**: Capacitor Browser plugin trunca query params no APK (bug #7319).
+**Problemas resolvidos**:
+1. Capacitor Browser plugin trunca query params no APK (bug #7319)
+2. Deep link não chegava ao app após pagamento (Auth Hub não redirecionava)
+3. Estado de assinatura não atualizava após voltar do checkout
 
-**Fluxo direto** (código curto evita truncamento):
-1. Usuário clica no botão de upgrade
-2. `App.tsx` chama `handleUpgradeClick()`
-3. Obtém `session.access_token` do Supabase
-4. Chama `POST /api/checkout-code` com Bearer token
-5. API valida token e gera código curto (8 chars, TTL 60s, one-time)
-6. Salva código na tabela `checkout_codes` (Supabase)
-7. Abre URL limpa: `https://onsite-auth.vercel.app/r/{code}` via `window.open(url, '_system')`
-8. Auth Hub (Hermes) na rota `/r/:code`:
-   - Valida código (existe, não expirado, não usado)
-   - Marca como usado
-   - 302 redirect para `/checkout/calculator?prefilled_email=...&user_id=...`
-9. Após pagamento, Auth Hub grava na tabela `billing_subscriptions`
-10. Redirect via deep link `onsitecalculator://auth-callback`
-11. App executa `refreshProfile()` → `checkPremiumAccess()` → libera Voice
+#### 8.5.1 Fluxo Completo de Checkout
 
-**Código curto** (gerado por `/api/checkout-code`):
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        FLUXO DE CHECKOUT (v4.9)                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. CLIQUE NO UPGRADE                                                       │
+│     └── handleUpgradeClick() em App.tsx                                     │
+│         └── PRIMEIRO: refreshProfile() verifica se já tem acesso            │
+│             └── Se hasAccess=true → NÃO abre checkout (já pagou!)           │
+│             └── Se hasAccess=false → continua fluxo                         │
+│                                                                             │
+│  2. GERAR CÓDIGO CURTO                                                      │
+│     └── POST /api/checkout-code (Bearer token)                              │
+│         └── Valida token Supabase                                           │
+│         └── Gera código 8 chars (sem 0/O, 1/l/I)                            │
+│         └── Salva em checkout_codes:                                        │
+│             - code, user_id, email, app                                     │
+│             - redirect_url: 'onsitecalculator://auth-callback'              │
+│             - expires_at: NOW + 60s                                         │
+│             - used: false                                                   │
+│         └── Retorna { code: "abc123XY" }                                    │
+│                                                                             │
+│  3. ABRIR CHECKOUT                                                          │
+│     └── window.open('https://onsite-auth.vercel.app/r/{code}', '_system')   │
+│         └── _system = abre no browser nativo (Chrome/Samsung)               │
+│                                                                             │
+│  4. AUTH HUB (Hermes) - Rota /r/:code                                       │
+│     └── Busca código em checkout_codes                                      │
+│     └── Valida: existe, não expirado, não usado                             │
+│     └── Marca used=true                                                     │
+│     └── 302 redirect → /checkout/calculator                                 │
+│         ?prefilled_email={email}                                            │
+│         &user_id={user_id}                                                  │
+│         &returnRedirect={redirect_url}                                      │
+│                                                                             │
+│  5. STRIPE CHECKOUT                                                         │
+│     └── Hermes cria sessão Stripe                                           │
+│     └── success_url inclui redirect param                                   │
+│                                                                             │
+│  6. PAGAMENTO OK                                                            │
+│     └── Stripe webhook → Hermes                                             │
+│     └── Hermes insere em billing_subscriptions:                             │
+│         - user_id, app_name='calculator', status='active'                   │
+│     └── Redirect para /checkout/success?redirect=onsitecalculator://...     │
+│                                                                             │
+│  7. PÁGINA SUCCESS (Hermes)                                                 │
+│     └── Mostra mensagem de sucesso                                          │
+│     └── window.location.href = redirect (deep link)                         │
+│         OU botão "Voltar ao App"                                            │
+│                                                                             │
+│  8. DEEP LINK RECEBIDO                                                      │
+│     └── Android: intent-filter captura onsitecalculator://auth-callback     │
+│     └── useDeepLink.ts: onCheckoutReturn() é chamado                        │
+│                                                                             │
+│  9. RETRY LOOP (Redundância v4.9)                                           │
+│     └── Delays: [1s, 2s, 4s] = 7s máximo                                    │
+│     └── Para cada tentativa:                                                │
+│         └── await delay                                                     │
+│         └── hasAccess = await refreshProfile()                              │
+│         └── logger.checkout.verifyAttempt(i, hasAccess)                     │
+│         └── Se hasAccess=true → return (sucesso!)                           │
+│     └── Se ainda false após 3 tentativas:                                   │
+│         └── alert("Feche e abra o app novamente")                           │
+│                                                                             │
+│  10. VOICE DESBLOQUEADO                                                     │
+│      └── hasVoiceAccess=true no estado                                      │
+│      └── Botão de mic funciona                                              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 8.5.2 Código Curto (checkout-code.ts)
+
+**Endpoint**: `POST /api/checkout-code`
+
+**Headers**:
+- `Authorization: Bearer {supabase_access_token}`
+- `Content-Type: application/json`
+
+**Body**:
+```json
+{ "app": "calculator" }
+```
+
+**Response**:
+```json
+{ "code": "abc123XY" }
+```
+
+**Características do código**:
 - 8 caracteres sem ambíguos (sem 0/O, 1/l/I)
 - TTL: 60 segundos
 - One-time use: marcado como `used=true` após consumo
-- Tabela: `checkout_codes`
+- Inclui `redirect_url` para deep link de retorno
 
-**Fallback** (quando API falha):
-```
-https://onsite-auth.vercel.app/checkout/calculator
-  ?user_id=uuid
-  &prefilled_email=user@example.com
-```
+#### 8.5.3 Tabela `checkout_codes` (Blue)
 
-**O que Auth Hub (Hermes) deve fazer na rota `/r/:code`**:
-1. Buscar código na tabela `checkout_codes`
-2. Validar: existe, não expirado (`expires_at`), não usado (`used=false`)
-3. Marcar como usado (`used=true`)
-4. 302 redirect para `/checkout/calculator?prefilled_email={email}&user_id={user_id}`
-
-**Tabela `checkout_codes`** (criada por Blue):
 ```sql
 CREATE TABLE checkout_codes (
   code TEXT PRIMARY KEY,
   user_id UUID NOT NULL,
   email TEXT NOT NULL,
   app TEXT NOT NULL DEFAULT 'calculator',
+  redirect_url TEXT,                        -- Deep link para retorno (v4.9)
   created_at TIMESTAMPTZ DEFAULT NOW(),
   expires_at TIMESTAMPTZ NOT NULL,
   used BOOLEAN DEFAULT FALSE
 );
+
+CREATE INDEX idx_checkout_codes_expires ON checkout_codes(expires_at);
+ALTER TABLE checkout_codes ENABLE ROW LEVEL SECURITY;
+```
+
+#### 8.5.4 Verificação Antes do Checkout (v4.9)
+
+```typescript
+// App.tsx - handleUpgradeClick
+const handleUpgradeClick = useCallback(async () => {
+  if (!supabase || !user) return;
+
+  // NOVO v4.9: Verifica se já tem acesso ANTES de redirecionar
+  const hasAccess = await refreshProfile();
+  if (hasAccess) {
+    logger.checkout.alreadySubscribed();
+    return; // Não precisa ir pro checkout!
+  }
+
+  // ... resto do fluxo de checkout ...
+}, [user, refreshProfile]);
+```
+
+#### 8.5.5 Retry Loop no Retorno (v4.9)
+
+```typescript
+// App.tsx - useDeepLink onCheckoutReturn
+onCheckoutReturn: async () => {
+  logger.checkout.complete(true, { action: 'refreshing_subscription' });
+
+  // Retry com backoff: 1s, 2s, 4s (total ~7s de espera máxima)
+  const delays = [1000, 2000, 4000];
+
+  for (let i = 0; i < delays.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, delays[i]));
+
+    const hasAccess = await refreshProfile();
+    logger.checkout.verifyAttempt(i + 1, hasAccess);
+
+    if (hasAccess) {
+      logger.checkout.verified(true, { attempt: i + 1 });
+      return; // Sucesso!
+    }
+  }
+
+  // Fallback após todas tentativas
+  logger.checkout.verified(false, { attempts: delays.length });
+  alert('Pagamento processado! Se o Voice não desbloqueou, feche e abra o app.');
+},
+```
+
+#### 8.5.6 refreshProfile() com Retorno (v4.9)
+
+```typescript
+// useAuth.ts
+const refreshProfile = useCallback(async (): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return false;
+
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .single();
+
+    // Força refresh (limpa cache e verifica no Supabase)
+    const hasVoiceAccess = await refreshSubscriptionStatus();
+
+    setAuthState(prev => ({
+      ...prev,
+      profile: profileData as UserProfile | null,
+      hasVoiceAccess,
+    }));
+
+    return hasVoiceAccess;  // NOVO: retorna boolean
+  } catch (error) {
+    logger.auth.error('Error refreshing profile', { error: String(error) });
+    return false;
+  }
+}, []);
+```
+
+#### 8.5.7 Logs de Checkout (v4.9)
+
+```typescript
+// logger.ts - novos métodos
+checkout: {
+  start: () => ...,
+  tokenRequest: (success, context) => ...,
+  redirect: (url) => ...,
+  complete: (success, context) => ...,
+  verifyAttempt: (attempt, hasAccess) => ...,  // NOVO v4.9
+  verified: (success, context) => ...,          // NOVO v4.9
+  alreadySubscribed: () => ...,                 // NOVO v4.9
+  error: (message, context) => ...,
+}
+```
+
+#### 8.5.8 Fallback URL
+
+Quando a API `/api/checkout-code` falha:
+```
+https://onsite-auth.vercel.app/checkout/calculator
+  ?user_id={uuid}
+  &prefilled_email={email}
+```
+
+#### 8.5.9 Dependências para Hermes (Auth Hub)
+
+**1. Rota `/r/:code`** - Passar `returnRedirect`:
+```typescript
+const checkoutUrl = new URL('/checkout/calculator', request.url);
+checkoutUrl.searchParams.set('prefilled_email', data.email);
+checkoutUrl.searchParams.set('user_id', data.user_id);
+
+if (data.redirect_url) {
+  checkoutUrl.searchParams.set('returnRedirect', data.redirect_url);
+}
+```
+
+**2. Página `/checkout/success`** - Redirecionar para deep link:
+```typescript
+const redirect = searchParams.get('redirect');
+if (redirect && redirect.startsWith('onsitecalculator://')) {
+  setTimeout(() => {
+    window.location.href = redirect;
+  }, 2000);
+}
 ```
 
 ### 8.6 Botão de Logout
@@ -1012,6 +1213,17 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 ### Changelog
 
+**v4.9 (2026-01-19) - Checkout Redundancy & Deep Link Return**
+- Fix: Deep link não chegava ao app após pagamento
+- Novo: `redirect_url` no checkout_codes para retorno ao app
+- Novo: Verificação ANTES do checkout (`refreshProfile()` verifica se já pagou)
+- Novo: Retry loop com backoff (1s, 2s, 4s) no retorno do checkout
+- Novo: `refreshProfile()` agora retorna `Promise<boolean>`
+- Novo: Logs `verifyAttempt`, `verified`, `alreadySubscribed`
+- Fix: Interface `SubscriptionData` corrigida (`app` → `app_name`)
+- Requer: Blue adicionar coluna `redirect_url TEXT` em checkout_codes
+- Requer: Hermes passar `returnRedirect` e redirecionar na página success
+
 **v4.8 (2026-01-19) - Checkout Code System**
 - Novo: `api/checkout-code.ts` - Gera código curto (8 chars, TTL 60s, one-time)
 - Novo: Sistema de código curto no PATH evita truncamento de URL no APK
@@ -1104,4 +1316,4 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 *Ceulen — Agente Calculator*
 *Subordinado a Blueprint (Blue)*
-*Última sync: 2026-01-19 (v4.8 - Checkout Code System + Sync de tipos)*
+*Última sync: 2026-01-19 (v4.9 - Checkout Redundancy & Deep Link Return)*
