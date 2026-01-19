@@ -2,7 +2,6 @@
 // App principal com sistema de autenticação completo
 
 import { useState, useCallback } from 'react';
-import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
 import Calculator from './components/Calculator';
 import AuthScreen from './components/AuthScreen';
@@ -32,27 +31,25 @@ export default function App() {
 
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
 
-  // Redireciona direto para o checkout (sem popup)
+  // Redireciona para checkout via código curto (evita truncamento de URL no APK)
   const handleUpgradeClick = useCallback(async () => {
     if (!supabase || !user) return;
 
+    const openUrl = (url: string) => {
+      // _system abre no browser padrão do sistema (Chrome/Samsung)
+      window.open(url, Capacitor.isNativePlatform() ? '_system' : '_blank');
+    };
+
     try {
-      // 1. Pega o access token da sessão atual
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         logger.checkout.error('No session token');
-        // Fallback sem token
-        const fallbackUrl = `${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}&redirect=onsitecalculator://auth-callback`;
-        if (Capacitor.isNativePlatform()) {
-          await Browser.open({ url: fallbackUrl, presentationStyle: 'popover' });
-        } else {
-          window.open(fallbackUrl, '_blank');
-        }
+        openUrl(`${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}`);
         return;
       }
 
-      // 2. Gera JWT token seguro via API
-      const tokenResponse = await fetch(`${API_BASE_URL}/api/checkout-token`, {
+      // Gera código curto via API
+      const response = await fetch(`${API_BASE_URL}/api/checkout-code`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -61,45 +58,23 @@ export default function App() {
         body: JSON.stringify({ app: 'calculator' }),
       });
 
-      if (!tokenResponse.ok) {
-        logger.checkout.tokenRequest(false, { status: tokenResponse.status });
-        // Fallback: abre checkout sem token
-        const fallbackUrl = `${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}&redirect=onsitecalculator://auth-callback`;
-        if (Capacitor.isNativePlatform()) {
-          await Browser.open({ url: fallbackUrl, presentationStyle: 'popover' });
-        } else {
-          window.open(fallbackUrl, '_blank');
-        }
+      if (!response.ok) {
+        logger.checkout.error('Failed to generate code', { status: response.status });
+        openUrl(`${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}`);
         return;
       }
 
-      const { token } = await tokenResponse.json();
+      const { code } = await response.json();
 
-      // 3. Monta URL com token JWT
-      const redirectUri = 'onsitecalculator://auth-callback';
-      const url = new URL(CHECKOUT_URL);
-      url.searchParams.set('token', token);
-      if (user.email) {
-        url.searchParams.set('prefilled_email', user.email);
-      }
-      url.searchParams.set('redirect', redirectUri);
+      // Abre URL limpa (sem query params) - o servidor faz 302 redirect
+      const checkoutUrl = `https://onsite-auth.vercel.app/r/${code}`;
+      console.log('[Checkout] Opening:', checkoutUrl);
+      logger.checkout.tokenRequest(true, { code });
+      openUrl(checkoutUrl);
 
-      // 4. Abre o checkout
-      logger.checkout.tokenRequest(true, {});
-      if (Capacitor.isNativePlatform()) {
-        await Browser.open({ url: url.toString(), presentationStyle: 'popover' });
-      } else {
-        window.open(url.toString(), '_blank');
-      }
     } catch (err) {
       logger.checkout.error('Checkout redirect failed', { error: String(err) });
-      // Fallback em caso de erro
-      const fallbackUrl = `${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}&redirect=onsitecalculator://auth-callback`;
-      if (Capacitor.isNativePlatform()) {
-        await Browser.open({ url: fallbackUrl, presentationStyle: 'popover' });
-      } else {
-        window.open(fallbackUrl, '_blank');
-      }
+      openUrl(`${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}`);
     }
   }, [user]);
 

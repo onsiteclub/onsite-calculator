@@ -8,7 +8,11 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
   },
   plugins: {
-    // Plugins configuration here
+    // Desabilita CapacitorHttp para evitar bug que remove query params
+    // https://github.com/ionic-team/capacitor/issues/7319
+    CapacitorHttp: {
+      enabled: false
+    }
   },
   android: {
     buildOptions: {
