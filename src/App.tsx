@@ -35,16 +35,26 @@ export default function App() {
   const handleUpgradeClick = useCallback(async () => {
     if (!supabase || !user) return;
 
+    // Verifica se já tem acesso (pode ter pago mas estado não atualizou)
+    const hasAccess = await refreshProfile();
+    if (hasAccess) {
+      logger.checkout.alreadySubscribed();
+      return; // Não precisa ir pro checkout!
+    }
+
     const openUrl = (url: string) => {
       // _system abre no browser padrão do sistema (Chrome/Samsung)
       window.open(url, Capacitor.isNativePlatform() ? '_system' : '_blank');
     };
 
+    // Fallback URL com user_id e email (para quando API não estiver disponível)
+    const fallbackUrl = `${CHECKOUT_URL}?user_id=${encodeURIComponent(user.id)}&prefilled_email=${encodeURIComponent(user.email || '')}`;
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         logger.checkout.error('No session token');
-        openUrl(`${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}`);
+        openUrl(fallbackUrl);
         return;
       }
 
@@ -60,7 +70,7 @@ export default function App() {
 
       if (!response.ok) {
         logger.checkout.error('Failed to generate code', { status: response.status });
-        openUrl(`${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}`);
+        openUrl(fallbackUrl);
         return;
       }
 
@@ -74,9 +84,9 @@ export default function App() {
 
     } catch (err) {
       logger.checkout.error('Checkout redirect failed', { error: String(err) });
-      openUrl(`${CHECKOUT_URL}?prefilled_email=${encodeURIComponent(user.email || '')}`);
+      openUrl(fallbackUrl);
     }
-  }, [user]);
+  }, [user, refreshProfile]);
 
   // Configura Deep Linking para receber callback do checkout
   useDeepLink({
@@ -87,10 +97,26 @@ export default function App() {
     onCheckoutReturn: async () => {
       // Callback de retorno do checkout (pagamento concluído)
       logger.checkout.complete(true, { action: 'refreshing_subscription' });
-      // Aguarda um pouco para o banco processar
-      setTimeout(async () => {
-        await refreshProfile();
-      }, 1500);
+
+      // Retry com backoff: 1s, 2s, 4s (total ~7s de espera máxima)
+      // O webhook do Stripe pode demorar para processar
+      const delays = [1000, 2000, 4000];
+
+      for (let i = 0; i < delays.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, delays[i]));
+
+        const hasAccess = await refreshProfile();
+        logger.checkout.verifyAttempt(i + 1, hasAccess);
+
+        if (hasAccess) {
+          logger.checkout.verified(true, { attempt: i + 1 });
+          return; // Sucesso, para de tentar
+        }
+      }
+
+      // Ainda sem acesso após todas tentativas
+      logger.checkout.verified(false, { attempts: delays.length });
+      alert('Pagamento processado! Se o Voice não desbloqueou, feche e abra o app novamente.');
     },
   });
 

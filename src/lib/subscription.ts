@@ -24,10 +24,12 @@ interface CachedSubscription {
 interface SubscriptionData {
   id: string;
   user_id: string;
-  app: string;
+  app_name: string;  // Nome da coluna no banco é app_name
   status: 'active' | 'canceled' | 'past_due' | 'inactive' | 'trialing';
   current_period_end?: string;
   cancel_at_period_end?: boolean;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
 }
 
 /**
@@ -84,6 +86,7 @@ async function setCache(data: CachedSubscription): Promise<void> {
  */
 export async function hasActiveSubscription(): Promise<boolean> {
   if (!supabase) {
+    console.log('[Subscription] No supabase client');
     return false;
   }
 
@@ -91,8 +94,11 @@ export async function hasActiveSubscription(): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
+      console.log('[Subscription] No user logged in');
       return false;
     }
+
+    console.log('[Subscription] Checking subscription for user:', user.id);
 
     // Busca subscription específica do calculator
     const { data, error } = await supabase
@@ -101,6 +107,8 @@ export async function hasActiveSubscription(): Promise<boolean> {
       .eq('user_id', user.id)
       .eq('app_name', 'calculator')
       .maybeSingle();
+
+    console.log('[Subscription] Query result:', { data, error: error?.message });
 
     // PGRST116 = "No rows found" - isso é esperado para usuários sem assinatura
     if (error && error.code !== 'PGRST116') {

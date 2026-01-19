@@ -233,6 +233,12 @@ export const logger = {
       log({ level: 'info', module: 'Checkout', action: 'redirect', context: { url } }),
     complete: (success: boolean, context?: Record<string, unknown>) =>
       log({ level: success ? 'info' : 'error', module: 'Checkout', action: 'complete', success, context }),
+    verifyAttempt: (attempt: number, hasAccess: boolean) =>
+      log({ level: 'info', module: 'Checkout', action: 'verify_attempt', context: { attempt, hasAccess } }),
+    verified: (success: boolean, context?: Record<string, unknown>) =>
+      log({ level: success ? 'info' : 'warn', module: 'Checkout', action: 'verified', success, context }),
+    alreadySubscribed: () =>
+      log({ level: 'info', module: 'Checkout', action: 'already_subscribed', success: true }),
     error: (message: string, context?: Record<string, unknown>) =>
       log({ level: 'error', module: 'Checkout', action: 'error', message, context }),
   },

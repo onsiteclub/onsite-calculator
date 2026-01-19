@@ -19,7 +19,7 @@ interface UseAuthReturn extends AuthState {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
+  refreshProfile: () => Promise<boolean>;  // Retorna true se tem acesso voice
 }
 
 export function useAuth(): UseAuthReturn {
@@ -211,13 +211,14 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   // Atualiza o perfil (útil após retornar do checkout)
-  const refreshProfile = useCallback(async () => {
-    if (!supabase) return;
+  // RETORNA: true se tem acesso voice, false se não
+  const refreshProfile = useCallback(async (): Promise<boolean> => {
+    if (!supabase) return false;
 
     try {
       // Pega o usuário atual da sessão
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
+      if (!session?.user) return false;
 
       // Busca perfil diretamente sem usar fetchProfile
       const { data: profileData } = await supabase
@@ -236,8 +237,11 @@ export function useAuth(): UseAuthReturn {
         profile,
         hasVoiceAccess,
       }));
+
+      return hasVoiceAccess;
     } catch (error) {
       logger.auth.error('Error refreshing profile', { error: String(error) });
+      return false;
     }
   }, []); // Sem dependências para evitar loop
 

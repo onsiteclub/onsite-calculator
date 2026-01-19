@@ -99,6 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         user_id: user.id,
         email: user.email,
         app,
+        redirect_url: 'onsitecalculator://auth-callback',  // Deep link para retorno ao app
         expires_at: expiresAt,
         used: false,
       });

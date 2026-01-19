@@ -2,7 +2,7 @@
 
 > **ESTE CABEÇALHO É IMUTÁVEL. NÃO ALTERE AS SEÇÕES MARCADAS COM [LOCKED].**
 >
-> Última sincronização com Blue: 2026-01-19
+> Última sincronização com Blue: 2026-01-19 (v4.8)
 
 ---
 
@@ -745,8 +745,13 @@ idle → recording → processing → idle
 export interface UserProfile {
   id: string;
   email: string;
+  nome: string;
+  first_name: string;
+  last_name: string;
   trade: string; // profissão
-  subscription_status: 'trialing' | 'active' | 'canceled';
+  birthday: string | null;
+  gender: string | null;
+  subscription_status: 'trialing' | 'active' | 'canceled' | 'past_due';
   trial_ends_at: string;
 }
 ```
@@ -782,51 +787,57 @@ interface SubscriptionData {
 - `Calculator.tsx` recebe `hasVoiceAccess` e `voiceState`
 - Se não tiver acesso → botão de mic redireciona DIRETO para checkout (sem popup)
 
-### 8.5 Checkout Externo (v4.4 - JWT + Auth Hub)
+### 8.5 Checkout Externo (v4.8 - Código Curto no PATH)
 
-**Fluxo direto** (sem popup intermediário):
+**Problema resolvido**: Capacitor Browser plugin trunca query params no APK (bug #7319).
+
+**Fluxo direto** (código curto evita truncamento):
 1. Usuário clica no botão de upgrade
 2. `App.tsx` chama `handleUpgradeClick()`
 3. Obtém `session.access_token` do Supabase
-4. Chama `POST /api/checkout-token` com Bearer token
-5. API valida token e gera JWT assinado (HS256)
-6. Redireciona para `https://onsite-auth.vercel.app/checkout/calculator?token=JWT`
-7. Auth Hub (Hermes) valida JWT e cria checkout Stripe
-8. Após pagamento, Auth Hub grava na tabela `billing_subscriptions`
-9. Redirect via deep link `onsitecalculator://auth-callback`
-10. App executa `refreshProfile()` → `checkPremiumAccess()` → libera Voice
+4. Chama `POST /api/checkout-code` com Bearer token
+5. API valida token e gera código curto (8 chars, TTL 60s, one-time)
+6. Salva código na tabela `checkout_codes` (Supabase)
+7. Abre URL limpa: `https://onsite-auth.vercel.app/r/{code}` via `window.open(url, '_system')`
+8. Auth Hub (Hermes) na rota `/r/:code`:
+   - Valida código (existe, não expirado, não usado)
+   - Marca como usado
+   - 302 redirect para `/checkout/calculator?prefilled_email=...&user_id=...`
+9. Após pagamento, Auth Hub grava na tabela `billing_subscriptions`
+10. Redirect via deep link `onsitecalculator://auth-callback`
+11. App executa `refreshProfile()` → `checkPremiumAccess()` → libera Voice
 
-**JWT Payload** (gerado por `/api/checkout-token`):
-```json
-{
-  "sub": "user-uuid",           // user_id
-  "email": "user@example.com",  // email
-  "app": "calculator",          // app identifier
-  "iat": 1234567890,            // issued at
-  "exp": 1234568190,            // expira em 5 min
-  "jti": "unique-id"            // request ID
-}
-```
+**Código curto** (gerado por `/api/checkout-code`):
+- 8 caracteres sem ambíguos (sem 0/O, 1/l/I)
+- TTL: 60 segundos
+- One-time use: marcado como `used=true` após consumo
+- Tabela: `checkout_codes`
 
-**URL Final enviada ao Auth Hub**:
+**Fallback** (quando API falha):
 ```
 https://onsite-auth.vercel.app/checkout/calculator
-  ?token=eyJhbGciOiJIUzI1NiIs...
+  ?user_id=uuid
   &prefilled_email=user@example.com
-  &redirect=onsitecalculator://auth-callback
 ```
 
-**Secret compartilhado**: `CHECKOUT_JWT_SECRET` (configurado em Calculator Vercel + Auth Hub)
+**O que Auth Hub (Hermes) deve fazer na rota `/r/:code`**:
+1. Buscar código na tabela `checkout_codes`
+2. Validar: existe, não expirado (`expires_at`), não usado (`used=false`)
+3. Marcar como usado (`used=true`)
+4. 302 redirect para `/checkout/calculator?prefilled_email={email}&user_id={user_id}`
 
-**O que Auth Hub (Hermes) deve fazer**:
-1. Validar JWT com `CHECKOUT_JWT_SECRET` (HS256)
-2. Verificar `exp` não expirou
-3. Criar checkout Stripe com `email` do payload
-4. Após pagamento OK, inserir em `billing_subscriptions`:
-   - `user_id` = `payload.sub`
-   - `app_name` = `'calculator'` (EXATAMENTE)
-   - `status` = `'active'`
-5. Redirect para `onsitecalculator://auth-callback`
+**Tabela `checkout_codes`** (criada por Blue):
+```sql
+CREATE TABLE checkout_codes (
+  code TEXT PRIMARY KEY,
+  user_id UUID NOT NULL,
+  email TEXT NOT NULL,
+  app TEXT NOT NULL DEFAULT 'calculator',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  used BOOLEAN DEFAULT FALSE
+);
+```
 
 ### 8.6 Botão de Logout
 
@@ -954,7 +965,8 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 ### Arquivos em `api/`
 - `interpret.ts` - API de voz (Whisper + GPT-4o + saveVoiceLog)
-- `checkout-token.ts` - Geração de JWT para checkout (HS256)
+- `checkout-code.ts` - Gera código curto para checkout (v4.8)
+- `checkout-token.ts` - Geração de JWT para checkout (HS256) [DEPRECATED - usar checkout-code]
 - `lib/voice-logs.ts` - Persistência de voice_logs (server-side, Blueprint)
 - `lib/api-logger.ts` - Logger server-side para app_logs (v4.4)
 
@@ -999,6 +1011,15 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 - [ ] Padronizar parsing de voz em modulo unico (evitar regex solta na UI)
 
 ### Changelog
+
+**v4.8 (2026-01-19) - Checkout Code System**
+- Novo: `api/checkout-code.ts` - Gera código curto (8 chars, TTL 60s, one-time)
+- Novo: Sistema de código curto no PATH evita truncamento de URL no APK
+- Fix: Capacitor Browser plugin trunca query params (issue #7319)
+- Fluxo: APK → POST /api/checkout-code → abre /r/{code} → 302 redirect
+- Requer: Tabela `checkout_codes` no Supabase (Blue)
+- Requer: Rota `/r/:code` no onsite-auth (Hermes)
+- App.tsx: Removido import do Browser plugin, usa `window.open(_system)`
 
 **v4.7 (2026-01-19) - Code Cleanup**
 - Removido: `VoiceUpgradePopup.tsx` - deletado permanentemente
@@ -1083,4 +1104,4 @@ export type VoiceState = 'idle' | 'recording' | 'processing';
 
 *Ceulen — Agente Calculator*
 *Subordinado a Blueprint (Blue)*
-*Última sync: 2026-01-19 (v4.7 - Code Cleanup)*
+*Última sync: 2026-01-19 (v4.8 - Checkout Code System + Sync de tipos)*
