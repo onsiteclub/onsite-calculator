@@ -47,9 +47,12 @@ interface CalculatorProps {
   setVoiceState: (state: VoiceState) => void;
   hasVoiceAccess: boolean;
   onVoiceUpgradeClick: () => void;
+  onVoiceUsed?: () => void;
   onSignOut: () => void;
   userName?: string;
   userId?: string;
+  remainingUses?: number;
+  isTrialMode?: boolean;
 }
 
 export default function Calculator({
@@ -57,9 +60,12 @@ export default function Calculator({
   setVoiceState,
   hasVoiceAccess,
   onVoiceUpgradeClick,
+  onVoiceUsed,
   onSignOut,
   userName,
   userId,
+  remainingUses,
+  isTrialMode,
 }: CalculatorProps) {
   const isOnline = useOnlineStatus();
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -101,6 +107,7 @@ export default function Calculator({
     appendKey,
     appendFraction,
     appendOperator,
+    loadResult,
   } = useCalculator();
 
   // Handler para quando gravação terminar
@@ -156,6 +163,10 @@ export default function Calculator({
         // Salva no histórico se houver resultado
         if (result) {
           addToHistory(result);
+        }
+        // Incrementa contador de uso de voz (para trial)
+        if (onVoiceUsed) {
+          onVoiceUsed();
         }
       } else if (data.error) {
         logger.voice.apiCall(duration, false, {
@@ -281,9 +292,13 @@ export default function Calculator({
   // Texto do botão de voz baseado no estado
   const getVoiceButtonText = () => {
     if (!isOnline) return 'Offline';
-    if (!hasVoiceAccess) return '🔒 Upgrade to Voice';
+    if (!hasVoiceAccess) return '🔒 Free Trial Ended';
     if (voiceState === 'recording') return 'Listening...';
     if (voiceState === 'processing') return 'Processing...';
+    // Mostra usos restantes se em modo trial
+    if (isTrialMode && remainingUses !== undefined) {
+      return `Hold to Speak (${remainingUses} left)`;
+    }
     return 'Hold to Speak';
   };
 
@@ -301,6 +316,23 @@ export default function Calculator({
     if (window.confirm('Você tem certeza que quer abrir o site OnSite Club?')) {
       window.open('https://onsiteclub.ca', '_blank');
     }
+  };
+
+  // Handler para quando clicar em entrada do histórico
+  const handleHistoryEntryClick = (entry: any) => {
+    // Converte HistoryEntry para CalculationResult
+    const result = {
+      expression: entry.expression,
+      resultDecimal: entry.resultDecimal,
+      resultFeetInches: entry.resultFeetInches,
+      resultTotalInches: entry.resultTotalInches,
+      isInchMode: entry.isInchMode,
+    };
+    
+    // Carrega o resultado na calculadora
+    loadResult(result);
+    
+    console.log('[Calculator] Loaded result from history:', entry.expression);
   };
 
   return (
@@ -334,16 +366,22 @@ export default function Calculator({
         <div className="card left-card">
           <div className="display-section">
             <div className="display-row">
-              {/* Total inches display - agora primeiro (invertido) */}
-              {lastResult?.isInchMode && (
-                <div className="display-box equal">
-                  <span className={`display-value ${voiceState}`}>{lastResult.resultTotalInches}</span>
-                </div>
-              )}
-              {/* Feet/inches display - agora segundo (invertido) */}
+              {/* Display ESQUERDO */}
               <div className="display-box equal">
                 <span className={`display-value ${voiceState}`}>
-                  {lastResult?.isInchMode ? lastResult.resultFeetInches : displayValue}
+                  {lastResult?.isInchMode 
+                    ? lastResult.resultFeetInches  // Modo inches: mostra feet/inches (ex: "1' 6 1/2"")
+                    : displayValue                 // Modo decimal: mostra resultado decimal (ex: "887.3")
+                  }
+                </span>
+              </div>
+              {/* Display DIREITO */}
+              <div className="display-box equal">
+                <span className={`display-value ${voiceState}`}>
+                  {lastResult?.isInchMode 
+                    ? lastResult.resultTotalInches // Modo inches: mostra total inches (ex: "18 1/2 In")
+                    : '—'                          // Modo decimal: mostra traço (não aplicável)
+                  }
                 </span>
               </div>
             </div>
@@ -451,6 +489,7 @@ export default function Calculator({
         history={history}
         isOpen={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
+        onEntryClick={handleHistoryEntryClick}
       />
 
       {/* Modal de Consentimento de Voz */}
