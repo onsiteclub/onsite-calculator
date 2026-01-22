@@ -8,30 +8,44 @@ interface HistoryModalProps {
   history: HistoryEntry[];
   isOpen: boolean;
   onClose: () => void;
+  onEntryClick: (entry: HistoryEntry) => void;
 }
 
 /**
- * Formata uma expressão no estilo "armada" (operador alinhado à esquerda)
- * Ex: "5 1/2 + 3 1/4" -> ["5 1/2", "+ 3 1/4"]
+ * Formata uma expressão no estilo "armada" melhorado
+ * Ex: "400 + 170 + 2500 + 105 + 3000" -> 
+ * ["400", "+ 170", "+ 2500", "+ 105", "+ 3000"]
  */
-function formatExpression(expression: string): string[] {
-  // Encontra operadores (+, -, *, /)
-  const operatorMatch = expression.match(/\s*([+\-*/])\s*/);
-
-  if (!operatorMatch) {
-    // Sem operador - retorna expressão simples
-    return [expression.trim()];
+function formatExpressionArmada(expression: string): string[] {
+  // Remove espaços extras
+  const cleaned = expression.trim();
+  
+  // Divide por operadores mantendo-os na string
+  const parts = cleaned.split(/\s*([+\-*/])\s*/);
+  
+  if (parts.length <= 1) {
+    // Expressão simples sem operadores
+    return [cleaned];
   }
-
-  const operatorIndex = expression.indexOf(operatorMatch[0]);
-  const firstPart = expression.slice(0, operatorIndex).trim();
-  const operator = operatorMatch[1];
-  const secondPart = expression.slice(operatorIndex + operatorMatch[0].length).trim();
-
-  return [firstPart, `${operator} ${secondPart}`];
+  
+  const lines: string[] = [];
+  
+  // Primeiro número (sem operador)
+  lines.push(parts[0]);
+  
+  // Resto: operador + número
+  for (let i = 1; i < parts.length; i += 2) {
+    if (i + 1 < parts.length) {
+      const operator = parts[i];
+      const number = parts[i + 1];
+      lines.push(`${operator} ${number}`);
+    }
+  }
+  
+  return lines;
 }
 
-export function HistoryModal({ history, isOpen, onClose }: HistoryModalProps) {
+export function HistoryModal({ history, isOpen, onClose, onEntryClick }: HistoryModalProps) {
   if (!isOpen) return null;
 
   return (
@@ -49,12 +63,19 @@ export function HistoryModal({ history, isOpen, onClose }: HistoryModalProps) {
             </div>
           ) : (
             history.map((entry) => {
-              const lines = formatExpression(entry.expression);
+              const lines = formatExpressionArmada(entry.expression);
 
               return (
-                <div key={entry.id} className="history-entry">
+                <div 
+                  key={entry.id} 
+                  className="history-entry clickable"
+                  onClick={() => {
+                    onEntryClick(entry);
+                    onClose();
+                  }}
+                >
                   <div className="history-expression">
-                    {lines.map((line, idx) => (
+                    {lines.map((line: string, idx: number) => (
                       <div key={idx} className="history-line">{line}</div>
                     ))}
                   </div>

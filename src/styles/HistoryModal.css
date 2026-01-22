@@ -84,6 +84,25 @@
   margin-bottom: 0;
 }
 
+/* Estilo clicável */
+.history-entry.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.history-entry.clickable:hover {
+  background: #EBF8FF;
+  border-color: #0F766E;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(15, 118, 110, 0.15);
+}
+
+.history-entry.clickable:active {
+  transform: translateY(0);
+  background: #DBEAFE;
+}
+
 /* Linhas da expressão (formato armada) */
 .history-expression {
   text-align: right;

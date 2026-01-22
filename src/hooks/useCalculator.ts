@@ -30,6 +30,7 @@ interface UseCalculatorReturn {
   appendKey: (key: string) => void;
   appendFraction: (fraction: string) => void;
   appendOperator: (operator: string) => void;
+  loadResult: (result: CalculationResult) => void;
 }
 
 /**
@@ -164,6 +165,20 @@ export function useCalculator(): UseCalculatorReturn {
     return result;
   }, []);
 
+  // Carregar resultado do histórico
+  const loadResult = useCallback((result: CalculationResult) => {
+    setExpression(result.expression);
+    setDisplayValue(result.resultFeetInches);
+    setLastResult(result);
+    setJustCalculated(true);
+    
+    logger.calculator.compute(true, {
+      expression: result.expression,
+      result: result.resultFeetInches,
+      inputMethod: 'history',
+    });
+  }, []);
+
   return {
     expression,
     setExpression: handleSetExpression,
@@ -178,5 +193,6 @@ export function useCalculator(): UseCalculatorReturn {
     appendKey,
     appendFraction,
     appendOperator,
+    loadResult,
   };
 }
