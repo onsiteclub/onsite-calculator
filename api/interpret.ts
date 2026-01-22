@@ -263,8 +263,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 3. Salvar voice_log se usuário tiver consentimento
     let voiceLogId: string | null = null;
+    console.log('[Voice] Checking voice_log save - userId:', userId);
     if (userId) {
       const hasConsent = await canCollectVoice(userId);
+      console.log('[Voice] canCollectVoice result:', hasConsent, 'for userId:', userId);
       if (hasConsent) {
         const voiceLog: VoiceLogRecord = {
           user_id: userId,

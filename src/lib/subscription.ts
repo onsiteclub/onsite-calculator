@@ -100,6 +100,14 @@ export async function hasActiveSubscription(): Promise<boolean> {
 
     console.log('[Subscription] Checking subscription for user:', user.id);
 
+    // Primeiro, busca TODAS as subscriptions do usuário para debug
+    const { data: allSubs } = await supabase
+      .from('billing_subscriptions')
+      .select('*')
+      .eq('user_id', user.id);
+
+    console.log('[Subscription] ALL subscriptions for user:', JSON.stringify(allSubs, null, 2));
+
     // Busca subscription específica do calculator
     const { data, error } = await supabase
       .from('billing_subscriptions')
@@ -108,7 +116,7 @@ export async function hasActiveSubscription(): Promise<boolean> {
       .eq('app_name', 'calculator')
       .maybeSingle();
 
-    console.log('[Subscription] Query result:', { data, error: error?.message });
+    console.log('[Subscription] Query result for calculator:', { data, error: error?.message });
 
     // PGRST116 = "No rows found" - isso é esperado para usuários sem assinatura
     if (error && error.code !== 'PGRST116') {

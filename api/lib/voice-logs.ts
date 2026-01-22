@@ -47,7 +47,11 @@ export interface VoiceLogRecord {
  */
 export async function canCollectVoice(userId: string): Promise<boolean> {
   const supabase = getSupabaseAdmin();
+  console.log('[VoiceLogs] canCollectVoice - supabase client:', !!supabase, 'userId:', userId);
+  console.log('[VoiceLogs] ENV check - SUPABASE_URL:', !!process.env.SUPABASE_URL, 'SERVICE_KEY:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+
   if (!supabase || !userId) {
+    console.log('[VoiceLogs] canCollectVoice returning false - no supabase or no userId');
     return false;
   }
 
@@ -60,12 +64,16 @@ export async function canCollectVoice(userId: string): Promise<boolean> {
       .eq('granted', true)
       .limit(1);
 
+    console.log('[VoiceLogs] consents query result:', { data, error: error?.message });
+
     if (error) {
       console.warn('[VoiceLogs] Error checking consent:', error.message);
       return false;
     }
 
-    return data && data.length > 0;
+    const hasConsent = data && data.length > 0;
+    console.log('[VoiceLogs] Final hasConsent:', hasConsent);
+    return hasConsent;
   } catch (err) {
     console.error('[VoiceLogs] Exception checking consent:', err);
     return false;

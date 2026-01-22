@@ -324,6 +324,283 @@ Ao iniciar sessão, ler este documento e verificar:
 
 ---
 
+## MAPA COMPLETO DE TABELAS SUPABASE (v5.0)
+
+> **Última auditoria:** 2026-01-22
+> **Total de tabelas usadas:** 7
+
+### Diagrama de Relacionamentos
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        BANCO DE DADOS SUPABASE                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────┐                                                           │
+│  │  auth.users  │  ← Tabela nativa do Supabase Auth                         │
+│  │     (id)     │                                                           │
+│  └──────┬───────┘                                                           │
+│         │                                                                    │
+│         │ user_id (FK em todas as tabelas)                                  │
+│         │                                                                    │
+│    ┌────┴────┬────────────┬────────────┬────────────┬────────────┐         │
+│    │         │            │            │            │            │         │
+│    ▼         ▼            ▼            ▼            ▼            ▼         │
+│ ┌──────┐ ┌──────────┐ ┌─────────┐ ┌────────┐ ┌──────────┐ ┌──────────────┐ │
+│ │profi-│ │billing_  │ │calcula- │ │voice_  │ │consents  │ │checkout_     │ │
+│ │les   │ │subscrip- │ │tions    │ │logs    │ │          │ │codes         │ │
+│ │      │ │tions     │ │         │ │        │ │          │ │              │ │
+│ └──────┘ └──────────┘ └────┬────┘ └────────┘ └──────────┘ └──────────────┘ │
+│                            │                                                │
+│                            │ voice_log_id (FK)                              │
+│                            ▼                                                │
+│                       ┌────────┐                                            │
+│                       │voice_  │                                            │
+│                       │logs    │                                            │
+│                       └────────┘                                            │
+│                                                                              │
+│  ┌──────────┐                                                               │
+│  │ app_logs │  ← Logging centralizado (sem FK obrigatório)                  │
+│  └──────────┘                                                               │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Tabela 1: `profiles`
+
+**Propósito:** Dados do perfil do usuário (extensão do auth.users)
+**Owner:** Blue (schema central)
+**Meu acesso:** SELECT apenas
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | UUID PK | FK para auth.users |
+| `email` | TEXT | Email do usuário |
+| `nome` | TEXT | Nome completo |
+| `first_name` | TEXT | Primeiro nome |
+| `last_name` | TEXT | Sobrenome |
+| `trade` | TEXT | Profissão (carpenter, framer, etc.) |
+| `birthday` | DATE | Data de nascimento |
+| `gender` | TEXT | Gênero |
+| `subscription_status` | TEXT | Status de assinatura (deprecado - usar billing_subscriptions) |
+| `trial_ends_at` | TIMESTAMPTZ | Fim do trial |
+| `created_at` | TIMESTAMPTZ | Criação |
+| `updated_at` | TIMESTAMPTZ | Última atualização |
+
+**Arquivos que usam:**
+- `src/hooks/useAuth.ts` (linhas 40, 225) - SELECT *
+
+---
+
+### Tabela 2: `billing_subscriptions`
+
+**Propósito:** Assinaturas de pagamento (Stripe)
+**Owner:** Blue (via Auth Hub/Hermes)
+**Meu acesso:** SELECT apenas (verificação de acesso)
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | UUID PK | ID único |
+| `user_id` | UUID FK | FK para auth.users |
+| `app_name` | TEXT | **IMPORTANTE: 'calculator'** |
+| `status` | TEXT | 'active', 'trialing', 'canceled', 'past_due', 'inactive' |
+| `current_period_end` | TIMESTAMPTZ | Fim do período atual |
+| `cancel_at_period_end` | BOOLEAN | Cancelado no fim do período |
+| `stripe_customer_id` | TEXT | ID do cliente no Stripe |
+| `stripe_subscription_id` | TEXT | ID da subscription no Stripe |
+| `created_at` | TIMESTAMPTZ | Criação |
+
+**Arquivos que usam:**
+- `src/lib/subscription.ts` (linhas 105, 113) - SELECT com filtro `app_name = 'calculator'`
+
+**⚠️ IMPORTANTE:** A query DEVE filtrar por `app_name = 'calculator'`:
+```typescript
+.from('billing_subscriptions')
+.eq('user_id', user.id)
+.eq('app_name', 'calculator')
+```
+
+---
+
+### Tabela 3: `calculations`
+
+**Propósito:** Histórico de cálculos realizados
+**Owner:** Blue (schema definido por Blueprint)
+**Meu acesso:** INSERT
+
+| Campo | Tipo | Descrição | Preenchido |
+|-------|------|-----------|------------|
+| `id` | UUID PK | Gerado automaticamente | Auto |
+| `user_id` | UUID FK | FK para auth.users | ✅ Sim |
+| `calc_type` | TEXT | 'length', 'area', 'volume', 'material', 'conversion', 'custom' | ✅ Sim |
+| `calc_subtype` | TEXT | 'feet_inches', 'feet_only', 'inches_fractions', 'mixed', 'decimal' | ✅ Sim |
+| `input_expression` | TEXT | Expressão digitada/falada | ✅ Sim |
+| `input_values` | JSONB | Valores parseados | ❌ Não |
+| `result_value` | DECIMAL | Resultado numérico | ✅ Sim |
+| `result_unit` | TEXT | 'inches' ou 'decimal' | ✅ Sim |
+| `result_formatted` | TEXT | Formato de exibição | ✅ Sim |
+| `input_method` | TEXT | 'keypad', 'voice', 'camera' | ✅ Sim |
+| `voice_log_id` | UUID FK | FK para voice_logs | ✅ Se voice |
+| `template_id` | UUID FK | FK para templates | ❌ Não |
+| `trade_context` | TEXT | Trade do usuário | ❌ Não (TODO) |
+| `was_successful` | BOOLEAN | Se calculou com sucesso | ✅ Sim |
+| `was_saved` | BOOLEAN | Se salvou nos favoritos | ❌ Não |
+| `was_shared` | BOOLEAN | Se compartilhou | ❌ Não |
+| `device_id` | TEXT | ID do dispositivo | ❌ Não |
+| `app_version` | TEXT | Versão do app | ✅ Se passado |
+| `created_at` | TIMESTAMPTZ | Timestamp | Auto |
+
+**Arquivos que usam:**
+- `src/lib/calculations.ts` (linha 116) - INSERT
+
+---
+
+### Tabela 4: `voice_logs`
+
+**Propósito:** Logs de gravação de voz (para ML)
+**Owner:** Blue (schema definido por Blueprint)
+**Meu acesso:** INSERT (server-side apenas, com verificação de consentimento)
+
+| Campo | Tipo | Descrição | Preenchido |
+|-------|------|-----------|------------|
+| `id` | UUID PK | Gerado automaticamente | Auto |
+| `user_id` | UUID FK | FK para auth.users | ✅ Sim |
+| `app_name` | TEXT | 'calculator' | ✅ Sim |
+| `feature_context` | TEXT | Contexto da feature | ❌ Não |
+| `session_id` | UUID | ID da sessão | ❌ Não |
+| `audio_duration_ms` | INTEGER | Duração do áudio | ❌ Não |
+| `audio_format` | TEXT | 'webm' | ❌ Não |
+| `transcription_raw` | TEXT | Texto do Whisper | ✅ Sim |
+| `transcription_normalized` | TEXT | Expressão parseada | ✅ Sim |
+| `transcription_engine` | TEXT | 'whisper-1' | ✅ Sim |
+| `language_detected` | VARCHAR(10) | 'en', 'pt', 'es', 'fr' | ✅ Sim |
+| `intent_detected` | TEXT | 'calculate' | ✅ Sim |
+| `intent_fulfilled` | BOOLEAN | Se conseguiu calcular | ✅ Sim |
+| `entities` | JSONB | {numbers, units, operators} | ✅ Sim |
+| `informal_terms` | JSONB | Termos informais detectados | ✅ Sim |
+| `was_successful` | BOOLEAN | Resultado final | ✅ Sim |
+| `error_type` | TEXT | Tipo de erro | ✅ Se erro |
+| `error_message` | TEXT | Mensagem de erro | ✅ Se erro |
+| `device_model` | TEXT | Modelo do dispositivo | ❌ Não |
+| `os` | TEXT | Sistema operacional | ❌ Não |
+| `app_version` | TEXT | Versão do app | ❌ Não |
+| `client_timestamp` | TIMESTAMPTZ | Timestamp do cliente | ❌ Não |
+| `created_at` | TIMESTAMPTZ | Timestamp | Auto |
+
+**Arquivos que usam:**
+- `api/lib/voice-logs.ts` (linha 92) - INSERT (server-side)
+
+**⚠️ IMPORTANTE:** Só salvar se `canCollectVoice(userId)` retornar true!
+
+---
+
+### Tabela 5: `consents`
+
+**Propósito:** Registro de consentimentos do usuário
+**Owner:** Blue
+**Meu acesso:** SELECT, UPSERT
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | UUID PK | Gerado automaticamente |
+| `user_id` | UUID FK | FK para auth.users |
+| `consent_type` | TEXT | 'voice_training', 'data_analytics', 'marketing', 'terms_of_service', 'privacy_policy' |
+| `granted` | BOOLEAN | Se foi concedido |
+| `granted_at` | TIMESTAMPTZ | Quando foi concedido |
+| `revoked_at` | TIMESTAMPTZ | Quando foi revogado |
+| `document_version` | TEXT | Versão do documento |
+| `ip_address` | TEXT | IP do usuário |
+| `user_agent` | TEXT | User-agent do browser |
+| `app_version` | TEXT | Versão do app |
+| `updated_at` | TIMESTAMPTZ | Última atualização |
+| `created_at` | TIMESTAMPTZ | Criação |
+
+**Constraint:** UNIQUE(user_id, consent_type)
+
+**Arquivos que usam:**
+- `src/lib/consent.ts` (linhas 28, 62, 117) - SELECT, UPSERT
+- `api/lib/voice-logs.ts` (linha 56) - SELECT (server-side)
+
+---
+
+### Tabela 6: `app_logs`
+
+**Propósito:** Logs de eventos do app
+**Owner:** Blue
+**Meu acesso:** INSERT
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | UUID PK | Gerado automaticamente |
+| `user_id` | UUID | FK para auth.users (nullable) |
+| `level` | TEXT | 'info', 'warn', 'error' |
+| `module` | TEXT | 'Voice', 'Auth', 'Subscription', 'Calculator', 'API', 'Sync', 'DeepLink', 'Checkout', 'History' |
+| `action` | TEXT | Ação realizada |
+| `message` | TEXT | Mensagem descritiva |
+| `context` | JSONB | Contexto adicional |
+| `device_info` | JSONB | Informações do dispositivo |
+| `duration_ms` | INTEGER | Duração em ms |
+| `success` | BOOLEAN | Se foi bem-sucedido |
+| `app_name` | TEXT | 'calculator' |
+| `created_at` | TIMESTAMPTZ | Timestamp |
+
+**Arquivos que usam:**
+- `src/lib/logger.ts` (linha 94) - INSERT (batch)
+- `api/lib/api-logger.ts` (linha 36) - INSERT (server-side)
+
+---
+
+### Tabela 7: `checkout_codes`
+
+**Propósito:** Códigos curtos para checkout (evita truncamento de URL)
+**Owner:** Blue (schema) / Hermes (consumo)
+**Meu acesso:** INSERT
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `code` | TEXT PK | Código curto (8 chars) |
+| `user_id` | UUID | FK para auth.users |
+| `email` | TEXT | Email do usuário |
+| `app` | TEXT | 'calculator' |
+| `redirect_url` | TEXT | Deep link para retorno ('onsitecalculator://auth-callback') |
+| `expires_at` | TIMESTAMPTZ | Expiração (60 segundos) |
+| `used` | BOOLEAN | Se já foi usado |
+| `created_at` | TIMESTAMPTZ | Criação |
+
+**Arquivos que usam:**
+- `api/checkout-code.ts` (linha 96) - INSERT
+
+---
+
+### Resumo de Acesso por Arquivo
+
+| Arquivo | Tabelas | Operações |
+|---------|---------|-----------|
+| `src/hooks/useAuth.ts` | profiles | SELECT |
+| `src/lib/subscription.ts` | billing_subscriptions | SELECT |
+| `src/lib/calculations.ts` | calculations | INSERT |
+| `src/lib/consent.ts` | consents | SELECT, UPSERT |
+| `src/lib/logger.ts` | app_logs | INSERT |
+| `api/lib/voice-logs.ts` | consents, voice_logs | SELECT, INSERT |
+| `api/lib/api-logger.ts` | app_logs | INSERT |
+| `api/checkout-code.ts` | checkout_codes | INSERT |
+
+---
+
+### Checklist de Verificação
+
+- [ ] `profiles`: Dados carregando corretamente no login?
+- [ ] `billing_subscriptions`: Filtro `app_name = 'calculator'` está correto?
+- [ ] `calculations`: Cálculos sendo salvos com userId?
+- [ ] `voice_logs`: Verificação de consentimento antes de salvar?
+- [ ] `consents`: Upsert funcionando com constraint unique?
+- [ ] `app_logs`: Batch de logs sendo enviado a cada 5s?
+- [ ] `checkout_codes`: Códigos expirando após 60s?
+
+---
+
 ## MINHA ARQUITETURA (ÍNTEGRA)
 
 > A arquitetura abaixo é minha referência técnica.

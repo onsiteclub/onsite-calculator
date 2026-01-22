@@ -1,11 +1,11 @@
 // src/App.tsx
-// App principal com sistema de autenticação completo
+// App principal com sistema de autenticação e trial de 20 usos gratuitos
 
 import { useState, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import Calculator from './components/Calculator';
-import AuthScreen from './components/AuthScreen';
-import { useAuth, useDeepLink } from './hooks';
+import SignupModal from './components/SignupModal';
+import { useAuth, useDeepLink, useVoiceUsage } from './hooks';
 import { supabase } from './lib/supabase';
 import { logger } from './lib/logger';
 import type { VoiceState } from './types/calculator';
@@ -23,37 +23,39 @@ export default function App() {
     profile,
     loading: authLoading,
     hasVoiceAccess,
-    signIn,
-    signUp,
     signOut,
     refreshProfile,
   } = useAuth();
 
+  const {
+    remainingUses,
+    hasReachedLimit,
+    incrementUsage,
+    resetUsage,
+  } = useVoiceUsage();
+
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [showSignupModal, setShowSignupModal] = useState(false);
+
+  // Função para abrir URL (browser externo no mobile)
+  const openUrl = useCallback((url: string) => {
+    window.open(url, Capacitor.isNativePlatform() ? '_system' : '_blank');
+  }, []);
 
   // Redireciona para checkout via código curto (evita truncamento de URL no APK)
-  const handleUpgradeClick = useCallback(async () => {
-    if (!supabase || !user) return;
-
-    // Verifica se já tem acesso (pode ter pago mas estado não atualizou)
-    const hasAccess = await refreshProfile();
-    if (hasAccess) {
-      logger.checkout.alreadySubscribed();
-      return; // Não precisa ir pro checkout!
+  const redirectToCheckout = useCallback(async (userId: string, email: string) => {
+    if (!supabase) {
+      // Fallback direto
+      const fallbackUrl = `${CHECKOUT_URL}?user_id=${encodeURIComponent(userId)}&prefilled_email=${encodeURIComponent(email)}`;
+      openUrl(fallbackUrl);
+      return;
     }
-
-    const openUrl = (url: string) => {
-      // _system abre no browser padrão do sistema (Chrome/Samsung)
-      window.open(url, Capacitor.isNativePlatform() ? '_system' : '_blank');
-    };
-
-    // Fallback URL com user_id e email (para quando API não estiver disponível)
-    const fallbackUrl = `${CHECKOUT_URL}?user_id=${encodeURIComponent(user.id)}&prefilled_email=${encodeURIComponent(user.email || '')}`;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         logger.checkout.error('No session token');
+        const fallbackUrl = `${CHECKOUT_URL}?user_id=${encodeURIComponent(userId)}&prefilled_email=${encodeURIComponent(email)}`;
         openUrl(fallbackUrl);
         return;
       }
@@ -70,6 +72,7 @@ export default function App() {
 
       if (!response.ok) {
         logger.checkout.error('Failed to generate code', { status: response.status });
+        const fallbackUrl = `${CHECKOUT_URL}?user_id=${encodeURIComponent(userId)}&prefilled_email=${encodeURIComponent(email)}`;
         openUrl(fallbackUrl);
         return;
       }
@@ -84,9 +87,73 @@ export default function App() {
 
     } catch (err) {
       logger.checkout.error('Checkout redirect failed', { error: String(err) });
+      const fallbackUrl = `${CHECKOUT_URL}?user_id=${encodeURIComponent(userId)}&prefilled_email=${encodeURIComponent(email)}`;
       openUrl(fallbackUrl);
     }
-  }, [user, refreshProfile]);
+  }, [openUrl]);
+
+  // Handler quando usuário clica no botão de upgrade (já logado)
+  const handleUpgradeClick = useCallback(async () => {
+    // Se não está logado, mostra modal de signup
+    if (!user) {
+      setShowSignupModal(true);
+      return;
+    }
+
+    if (!supabase) return;
+
+    // Verifica se já tem acesso (pode ter pago mas estado não atualizou)
+    const hasAccess = await refreshProfile();
+    if (hasAccess) {
+      logger.checkout.alreadySubscribed();
+      return;
+    }
+
+    // Redireciona para checkout
+    await redirectToCheckout(user.id, user.email || '');
+  }, [user, refreshProfile, redirectToCheckout]);
+
+  // Handler quando signup/login é bem-sucedido no modal
+  const handleSignupSuccess = useCallback(async (userId: string, email: string) => {
+    setShowSignupModal(false);
+
+    // Aguarda um momento para a sessão ser estabelecida
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Verifica se já tem acesso
+    const hasAccess = await refreshProfile();
+    if (hasAccess) {
+      logger.checkout.alreadySubscribed();
+      // Reseta o contador se já tem acesso
+      await resetUsage();
+      return;
+    }
+
+    // Redireciona para checkout
+    await redirectToCheckout(userId, email);
+  }, [refreshProfile, redirectToCheckout, resetUsage]);
+
+  // Handler quando uso de voz é feito (para incrementar contador)
+  const handleVoiceUsed = useCallback(async () => {
+    // Só incrementa se não está logado ou não tem acesso
+    if (!user || !hasVoiceAccess) {
+      await incrementUsage();
+    }
+  }, [user, hasVoiceAccess, incrementUsage]);
+
+  // Verifica se deve bloquear voz (limite atingido e não logado)
+  const shouldBlockVoice = useCallback(() => {
+    // Se está logado e tem acesso, não bloqueia
+    if (user && hasVoiceAccess) return false;
+
+    // Se atingiu o limite, bloqueia
+    return hasReachedLimit;
+  }, [user, hasVoiceAccess, hasReachedLimit]);
+
+  // Handler para quando tenta usar voz mas está bloqueado
+  const handleVoiceBlocked = useCallback(() => {
+    setShowSignupModal(true);
+  }, []);
 
   // Configura Deep Linking para receber callback do checkout
   useDeepLink({
@@ -99,7 +166,6 @@ export default function App() {
       logger.checkout.complete(true, { action: 'refreshing_subscription' });
 
       // Retry com backoff: 1s, 2s, 4s (total ~7s de espera máxima)
-      // O webhook do Stripe pode demorar para processar
       const delays = [1000, 2000, 4000];
 
       for (let i = 0; i < delays.length; i++) {
@@ -110,13 +176,15 @@ export default function App() {
 
         if (hasAccess) {
           logger.checkout.verified(true, { attempt: i + 1 });
-          return; // Sucesso, para de tentar
+          // Reseta contador após confirmar subscription
+          await resetUsage();
+          return;
         }
       }
 
       // Ainda sem acesso após todas tentativas
       logger.checkout.verified(false, { attempts: delays.length });
-      alert('Pagamento processado! Se o Voice não desbloqueou, feche e abra o app novamente.');
+      alert('Payment processed! If Voice is not unlocked, close and reopen the app.');
     },
   });
 
@@ -125,32 +193,38 @@ export default function App() {
     return (
       <div className="app-loading">
         <div className="loading-spinner"></div>
-        <p>Carregando...</p>
+        <p>Loading...</p>
       </div>
     );
   }
 
-  // Se não está autenticado, mostra tela de login
-  if (!user) {
-    return (
-      <AuthScreen
-        onSignIn={signIn}
-        onSignUp={signUp}
-        loading={authLoading}
-      />
-    );
-  }
+  // Determina se tem acesso à voz
+  // - Se tem subscription ativa: acesso ilimitado
+  // - Se não tem subscription: trial mode (20 usos gratuitos)
+  const effectiveVoiceAccess = hasVoiceAccess || !hasReachedLimit;
 
-  // Usuário autenticado: mostra calculadora
   return (
-    <Calculator
-      voiceState={voiceState}
-      setVoiceState={setVoiceState}
-      hasVoiceAccess={hasVoiceAccess}
-      onVoiceUpgradeClick={handleUpgradeClick}
-      onSignOut={signOut}
-      userName={profile?.nome || profile?.email || user?.email}
-      userId={user?.id}
-    />
+    <div className="app">
+      <Calculator
+        voiceState={voiceState}
+        setVoiceState={setVoiceState}
+        hasVoiceAccess={effectiveVoiceAccess}
+        onVoiceUpgradeClick={shouldBlockVoice() ? handleVoiceBlocked : handleUpgradeClick}
+        onVoiceUsed={handleVoiceUsed}
+        onSignOut={user ? signOut : () => {}}
+        userName={profile?.nome || profile?.email || user?.email}
+        userId={user?.id}
+        remainingUses={hasVoiceAccess ? undefined : remainingUses}
+        isTrialMode={!hasVoiceAccess}
+      />
+
+      {/* Modal de Signup/Login */}
+      {showSignupModal && (
+        <SignupModal
+          onSuccess={handleSignupSuccess}
+          onClose={() => setShowSignupModal(false)}
+        />
+      )}
+    </div>
   );
 }
