@@ -14,7 +14,7 @@ import './styles/App.css';
 // URL do checkout
 const CHECKOUT_URL = 'https://onsite-auth.vercel.app/checkout/calculator';
 const API_BASE_URL = Capacitor.isNativePlatform()
-  ? 'https://calculator.onsiteclub.ca'
+  ? 'https://onsite-calculator.vercel.app'
   : '';
 
 export default function App() {

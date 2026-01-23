@@ -34,7 +34,7 @@ const getApiEndpoint = () => {
 
   // For native apps (Capacitor), use full production URL
   if (Capacitor.isNativePlatform()) {
-    return 'https://calculator.onsiteclub.ca/api/interpret';
+    return 'https://onsite-calculator.vercel.app/api/interpret';
   }
 
   return '/api/interpret';
