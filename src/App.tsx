@@ -163,18 +163,22 @@ export default function App() {
     },
     onCheckoutReturn: async () => {
       // Callback de retorno do checkout (pagamento concluído)
+      console.log('[App] onCheckoutReturn CALLED! Starting subscription check...');
       logger.checkout.complete(true, { action: 'refreshing_subscription' });
 
       // Retry com backoff: 1s, 2s, 4s (total ~7s de espera máxima)
       const delays = [1000, 2000, 4000];
 
       for (let i = 0; i < delays.length; i++) {
+        console.log(`[App] Checkout verify attempt ${i + 1}, waiting ${delays[i]}ms...`);
         await new Promise(resolve => setTimeout(resolve, delays[i]));
 
         const hasAccess = await refreshProfile();
+        console.log(`[App] Checkout verify attempt ${i + 1} result: hasAccess=${hasAccess}`);
         logger.checkout.verifyAttempt(i + 1, hasAccess);
 
         if (hasAccess) {
+          console.log('[App] Subscription verified! Voice unlocked.');
           logger.checkout.verified(true, { attempt: i + 1 });
           // Reseta contador após confirmar subscription
           await resetUsage();
@@ -183,6 +187,7 @@ export default function App() {
       }
 
       // Ainda sem acesso após todas tentativas
+      console.log('[App] Failed to verify subscription after all attempts');
       logger.checkout.verified(false, { attempts: delays.length });
       alert('Payment processed! If Voice is not unlocked, close and reopen the app.');
     },
@@ -212,6 +217,7 @@ export default function App() {
         onVoiceUpgradeClick={shouldBlockVoice() ? handleVoiceBlocked : handleUpgradeClick}
         onVoiceUsed={handleVoiceUsed}
         onSignOut={user ? signOut : () => {}}
+        onSignIn={() => setShowSignupModal(true)}
         userName={profile?.nome || profile?.email || user?.email}
         userId={user?.id}
         remainingUses={hasVoiceAccess ? undefined : remainingUses}

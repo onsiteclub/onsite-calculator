@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { App, type URLOpenListenerEvent } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 
 interface UseDeepLinkProps {
   onAuthCallback?: (accessToken: string, refreshToken: string) => void;
@@ -30,19 +31,21 @@ export function useDeepLink({ onAuthCallback, onCheckoutReturn }: UseDeepLinkPro
 
     const handleAppUrlOpen = async (event: URLOpenListenerEvent) => {
       const url = event.url;
-      console.log('[DeepLink] App opened with URL:', url);
+      console.log('[DeepLink] URL received:', url);
+      logger.deepLink.received(url);
 
-      // Verifica se é um callback de autenticação
-      if (url.includes('auth-callback')) {
+      // Verifica se é um callback de autenticação ou checkout
+      if (url.includes('auth-callback') || url.includes('onsitecalculator://')) {
+        console.log('[DeepLink] Processing callback URL');
         try {
           const urlObj = new URL(url);
           const accessToken = urlObj.searchParams.get('access_token');
           const refreshToken = urlObj.searchParams.get('refresh_token');
 
+          console.log('[DeepLink] Tokens found:', { hasAccessToken: !!accessToken, hasRefreshToken: !!refreshToken });
+
           // Se tem tokens, é login OAuth
           if (accessToken && refreshToken) {
-            console.log('[DeepLink] Auth tokens received');
-
             // Se o Supabase está disponível, seta a sessão
             if (supabase) {
               const { error } = await supabase.auth.setSession({
@@ -50,11 +53,7 @@ export function useDeepLink({ onAuthCallback, onCheckoutReturn }: UseDeepLinkPro
                 refresh_token: refreshToken,
               });
 
-              if (error) {
-                console.error('[DeepLink] Error setting session:', error);
-              } else {
-                console.log('[DeepLink] Session set successfully');
-              }
+              logger.deepLink.authCallback(!error, error ? { error: error.message } : undefined);
             }
 
             // Chama callback customizado se fornecido (via ref)
@@ -63,14 +62,22 @@ export function useDeepLink({ onAuthCallback, onCheckoutReturn }: UseDeepLinkPro
             }
           } else {
             // Sem tokens = retorno do checkout (pagamento concluído)
-            console.log('[DeepLink] Checkout return detected, refreshing subscription');
+            console.log('[DeepLink] No tokens - treating as checkout return');
+            console.log('[DeepLink] checkoutCallbackRef.current exists:', !!checkoutCallbackRef.current);
+            logger.deepLink.checkoutCallback(true);
             if (checkoutCallbackRef.current) {
+              console.log('[DeepLink] Calling onCheckoutReturn callback');
               checkoutCallbackRef.current();
+            } else {
+              console.log('[DeepLink] WARNING: No checkout callback registered!');
             }
           }
         } catch (error) {
-          console.error('[DeepLink] Error parsing URL:', error);
+          console.error('[DeepLink] Error processing URL:', error);
+          logger.deepLink.error('Error parsing URL', { error: String(error), url });
         }
+      } else {
+        console.log('[DeepLink] URL does not match expected patterns, ignoring');
       }
     };
 
@@ -84,7 +91,7 @@ export function useDeepLink({ onAuthCallback, onCheckoutReturn }: UseDeepLinkPro
     // Cleanup
     return () => {
       if (cleanupPromise) {
-        cleanupPromise.catch(console.error);
+        cleanupPromise.catch((err) => logger.deepLink.error('Cleanup error', { error: String(err) }));
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1192,6 +1192,28 @@
   background: #FECACA;
 }
 
+.sign-in-btn {
+  background: #FDB913;
+  border: 1px solid #FDB913;
+  color: #FFFFFF;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.sign-in-btn:hover {
+  background: #E5A711;
+  border-color: #E5A711;
+}
+
+.sign-in-btn:active {
+  background: #CC9510;
+}
+
 /* ============================================
    LOADING SCREEN
    ============================================ */
